@@ -49,20 +49,49 @@ conversation; none of those paths exist here.
 ```
 foreman/
   AGENTS.md              standing instructions loaded into the foreman session
-  extensions/foreman.ts  the model-facing tools
+  extensions/foreman.ts  the model-facing tools and the auto wake
   bin/foreman            launcher: pi -e extensions/foreman.ts
   bin/*.sh               zero-token mechanics: spawn, read, steer, stop
+  projects/              the captain's repositories (gitignored)
+  worktrees/<id>         one git worktree per isolated crew member (gitignored)
   .foreman/              runtime state (gitignored)
     tasks/<id>/
       task.md            the requirement, verbatim
       brief.md           what the crew member is told
       report.md          what the crew member produced
       status             state= at= note=
-      meta               pane= tab= workspace= cwd= session= harness=
+      meta               pane= tab= workspace= cwd= project= worktree= branch=
       inbox/NNN.msg      steers from the foreman
       inbox/handled/     crew moves the file here to acknowledge
+    config.json          crew settings
     BOARD.md             generated status board
 ```
+
+## Isolation
+
+A crew member is spawned either with an explicit `cwd` or with a `project` from
+`projects/`. A project spawn cuts a git worktree at `worktrees/<id>` on a new
+`crew/<id>` branch, so parallel work on one repository never collides and the
+captain's checkout is never the crew's working directory. Removal refuses a
+dirty worktree unless forced: nothing is discarded silently.
+
+## Folder trust
+
+Pi asks for folder trust the first time it runs in a directory. Crew launches
+pass `--approve`, and the worktree path is pre-registered in pi's trust file, so
+neither the crew nor a human who later attaches to the pane is ever prompted.
+
+## Auto wake
+
+`bin/crew-watch.sh` is a one-shot watcher: it blocks until a crew member enters
+`done`, `failed`, `blocked`, or `lost`, prints one line, and exits. The extension
+keeps it running as a child and injects that line into the session when it
+returns. The line carries state only — never crew output — so waking the foreman
+costs one line, and the foreman then decides what, if anything, to read.
+
+The model never polls. Both halves are bounded: the watcher compares states on a
+fixed interval in bash, and the extension restarts it with backoff after a
+failed child.
 
 ## Transport
 
@@ -97,9 +126,7 @@ the endpoint, and labels are display only.
 
 ## What is deliberately absent
 
-- No automatic wake injection into the foreman. The captain asks; the foreman
-  calls `crew_list`. (An opt-in one-line watcher ping is a later decision, and it
-  must never carry payload.)
-- No worktree manager. Crew run in the directory they are given; git worktrees
-  are the caller's choice.
+- No payload in a wake. The notification is one line of state; anything more is
+  a deliberate `crew_list` or `crew_read`.
 - No supervision branch, no second mates, no quota routing, no PR pipeline.
+- No budget accounting.

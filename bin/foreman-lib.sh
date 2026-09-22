@@ -7,6 +7,9 @@ FOREMAN_ROOT="${FOREMAN_ROOT:-$(cd "$_FOREMAN_LIB_DIR/.." && pwd)}"
 FOREMAN_HOME="${FOREMAN_HOME:-$FOREMAN_ROOT/.foreman}"
 FOREMAN_TASKS="$FOREMAN_HOME/tasks"
 FOREMAN_BOARD="$FOREMAN_HOME/BOARD.md"
+FOREMAN_CONFIG="$FOREMAN_HOME/config.json"
+FOREMAN_PROJECTS="${FOREMAN_PROJECTS:-$FOREMAN_ROOT/projects}"
+FOREMAN_WORKTREES="${FOREMAN_WORKTREES:-$FOREMAN_ROOT/worktrees}"
 FOREMAN_SESSION="${FOREMAN_SESSION:-default}"
 
 foreman_die() {
@@ -39,6 +42,33 @@ foreman_valid_state() {
 
 foreman_valid_key() {
   case "$1" in '' | *[!a-z_]*) return 1 ;; esac
+}
+
+# --- session config -------------------------------------------------------
+# Personal settings live in the runtime home, not in the committed tree.
+
+foreman_config_get() { # <key>
+  [ -f "$FOREMAN_CONFIG" ] || return 0
+  jq -r --arg k "$1" 'if has($k) then (.[$k] | tostring) else empty end' \
+    "$FOREMAN_CONFIG" 2>/dev/null | head -1
+}
+
+foreman_config_bool() { # <key> <default-0-or-1>
+  case "$(foreman_config_get "$1")" in
+  true | 1 | yes | on) printf '1' ;;
+  false | 0 | no | off) printf '0' ;;
+  *) printf '%s' "$2" ;;
+  esac
+}
+
+# --- projects and worktrees ----------------------------------------------
+
+# A project argument is either a name under projects/ or an explicit path.
+foreman_project_path() { # <name-or-path>
+  case "$1" in
+  */*) printf '%s' "$1" ;;
+  *) printf '%s/%s' "$FOREMAN_PROJECTS" "$1" ;;
+  esac
 }
 
 foreman_task_dir() { printf '%s/%s' "$FOREMAN_TASKS" "$1"; }

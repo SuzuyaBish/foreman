@@ -1,29 +1,90 @@
 #!/usr/bin/env bash
 # crew-spawn.sh - create one crew member: a Herdr tab running a fresh pi.
-# Usage: crew-spawn.sh <id> <cwd> [--model M] [--thinking L] <task text...>
+#
+# Usage: crew-spawn.sh <id> <cwd> [options] <task text...>
+#        crew-spawn.sh <id> --project <name> [options] <task text...>
+#
+# Options:
+#   --project <name>   a project under projects/; isolates into a worktree by default
+#   --cwd <path>       explicit working directory
+#   --isolate          force a git worktree (needs --project)
+#   --no-isolate       work directly in the project checkout
+#   --base <ref>       worktree base (default HEAD)
+#   --model <model>    model for this crew member (default: config crewModel)
+#   --thinking <lvl>   low|medium|high|xhigh|max (default: config crewThinking)
+#   -- <text>          everything after this is task text
+#
+# Model, thinking level, folder-trust approval, and worktree isolation all fall
+# back to crew-config.sh, so the captain can say "run the crew on X" once.
 set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"
 
-ID=${1:-}
-CWD=${2:-}
-if [ $# -ge 2 ]; then shift 2; else set --; fi
+need_val() { [ "$#" -ge 2 ] || foreman_die "$1 requires a value"; }
 
+ID=${1:-}
+if [ $# -ge 1 ]; then shift; fi
+
+CWD=
+PROJECT=
+ISOLATE=
 MODEL=
 THINKING=
+BASE=HEAD
 PARTS=()
+seen_target=0
 while [ $# -gt 0 ]; do
   case "$1" in
+  --project)
+    need_val "$@"
+    PROJECT=$2
+    seen_target=1
+    shift 2
+    ;;
+  --cwd)
+    need_val "$@"
+    CWD=$2
+    seen_target=1
+    shift 2
+    ;;
   --model)
-    MODEL=${2:-}
-    shift 2 || shift 1
+    need_val "$@"
+    MODEL=$2
+    shift 2
     ;;
   --thinking)
-    THINKING=${2:-}
-    shift 2 || shift 1
+    need_val "$@"
+    THINKING=$2
+    shift 2
+    ;;
+  --base)
+    need_val "$@"
+    BASE=$2
+    shift 2
+    ;;
+  --isolate)
+    ISOLATE=1
+    shift
+    ;;
+  --no-isolate)
+    ISOLATE=0
+    shift
+    ;;
+  --)
+    shift
+    PARTS+=("$@")
+    break
+    ;;
+  -*)
+    foreman_die "unknown option: $1"
     ;;
   *)
-    PARTS+=("$1")
+    if [ "$seen_target" -eq 0 ] && [ "${#PARTS[@]}" -eq 0 ]; then
+      CWD=$1
+      seen_target=1
+    else
+      PARTS+=("$1")
+    fi
     shift
     ;;
   esac
@@ -31,13 +92,45 @@ done
 TASK="${PARTS[*]-}"
 
 foreman_valid_id "$ID" || foreman_die "task id must be a kebab-case slug of 1-32 chars: '${ID}'"
-[ -n "$CWD" ] || foreman_die "usage: crew-spawn.sh <id> <cwd> [--model M] [--thinking L] <task text...>"
-[ -d "$CWD" ] || foreman_die "working directory does not exist: $CWD"
 [ -n "$TASK" ] || foreman_die "task text is empty"
 foreman_need_herdr
 
+if [ -n "$PROJECT" ] && [ -n "$CWD" ]; then
+  foreman_die "give either a cwd or --project, not both"
+fi
+if [ -z "$PROJECT" ] && [ -z "$CWD" ]; then
+  foreman_die "give a working directory or --project <name>; see crew-projects.sh"
+fi
+
+# Defaults from the session config.
+[ -n "$MODEL" ] || MODEL=$(foreman_config_get crewModel || true)
+[ -n "$THINKING" ] || THINKING=$(foreman_config_get crewThinking || true)
+if [ -z "$ISOLATE" ]; then
+  if [ -n "$PROJECT" ]; then
+    ISOLATE=$(foreman_config_bool crewIsolate 1)
+  else
+    ISOLATE=0
+  fi
+fi
+if [ "$ISOLATE" = 1 ] && [ -z "$PROJECT" ]; then
+  foreman_die "--isolate needs --project (a worktree is cut from a project checkout)"
+fi
+APPROVE=$(foreman_config_bool crewApprove 1)
+TRUST_PATHS=$(foreman_config_bool trustPaths 1)
+
 DIR=$(foreman_task_dir "$ID")
 [ ! -e "$DIR" ] || foreman_die "crew task '$ID' already exists; archive it or pick another id"
+
+WT=
+PROJ=
+if [ "$ISOLATE" = 1 ]; then
+  PROJ=$(foreman_project_path "$PROJECT")
+  WT=$("$FOREMAN_ROOT/bin/crew-worktree.sh" add "$PROJECT" "$ID" --base "$BASE") ||
+    foreman_die "could not create an isolated worktree for '$ID' in project '$PROJECT'"
+  CWD=$WT
+fi
+[ -d "$CWD" ] || foreman_die "working directory does not exist: $CWD"
+CWD=$(cd "$CWD" && pwd -P)
 
 mkdir -p "$DIR/inbox/handled"
 printf '%s\n' "$TASK" >"$DIR/task.md"
@@ -122,11 +215,23 @@ fi
   printf 'session=%s\n' "$FOREMAN_SESSION"
   printf 'cwd=%s\n' "$CWD"
   printf 'harness=pi\n'
+  [ -z "$PROJ" ] || printf 'project=%s\n' "$PROJ"
+  [ -z "$WT" ] || printf 'worktree=%s\n' "$WT"
+  [ -z "$WT" ] || printf 'branch=crew/%s\n' "$ID"
+  [ -z "$MODEL" ] || printf 'model=%s\n' "$MODEL"
+  [ -z "$THINKING" ] || printf 'thinking=%s\n' "$THINKING"
   printf 'created=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"$DIR/meta"
 
+# Pre-register folder trust so nobody is prompted, including a human who later
+# attaches to this pane. Best effort: a failure must not fail the spawn.
+if [ "$TRUST_PATHS" = 1 ] && [ -d "$HOME/.pi" ]; then
+  "$FOREMAN_ROOT/bin/crew-trust.sh" "$CWD" >/dev/null 2>&1 || true
+fi
+
 POINTER="Read $DIR/brief.md and follow it exactly. It describes your whole task."
 CMD="${FOREMAN_PI_BIN:-pi}"
+[ "$APPROVE" != 1 ] || CMD="$CMD --approve"
 [ -z "$MODEL" ] || CMD="$CMD --model $(printf '%q' "$MODEL")"
 [ -z "$THINKING" ] || CMD="$CMD --thinking $(printf '%q' "$THINKING")"
 CMD="$CMD $(printf '%q' "$POINTER")"
@@ -139,3 +244,6 @@ fi
 
 foreman_status_set "$ID" working "spawned"
 printf 'spawned %s pane=%s:%s\n' "$ID" "$FOREMAN_SESSION" "$PANE"
+printf 'cwd %s\n' "$CWD"
+[ -z "$WT" ] || printf 'worktree %s on branch crew/%s\n' "$WT" "$ID"
+[ -z "$MODEL" ] || printf 'model %s\n' "$MODEL"
