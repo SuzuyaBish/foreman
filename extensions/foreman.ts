@@ -1,14 +1,13 @@
 /**
- * foreman - crew tools for the foreman session.
+ * foreman - crew tools, auto wake, and the zero-token crew chrome.
  *
  * Every tool shells out to a zero-token bash script under ../bin and returns a
  * hard-capped string. Crew output never streams into this conversation: a crew
  * member's report is only ever read by an explicit crew_read call.
  *
- * The same extension owns the auto wake: a one-shot bash watcher is kept
- * running as a child, and when it reports a crew state change the extension
- * injects its single line into this session. The line carries state only, never
- * crew output, so waking the foreman stays cheap.
+ * The same extension owns the auto wake (a one-shot bash watcher kept as a
+ * child, whose single line is injected) and the status line/widget, which are
+ * rendered from the task records directly and cost no tokens at all.
  *
  * See ../DESIGN.md for the context contract this exists to enforce.
  */
@@ -18,11 +17,16 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	defineTool,
+	type ExtensionAPI,
+	type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = path.join(ROOT, "bin");
 const HOME = process.env.FOREMAN_HOME ?? path.join(ROOT, ".foreman");
+const TASKS = path.join(HOME, "tasks");
 
 /** Hard ceiling on anything a tool may put into the foreman's context. */
 const CAP = 4000;
@@ -70,7 +74,8 @@ const crewSpawn = defineTool({
 		}),
 		project: Type.Optional(
 			Type.String({
-				description: "Project name under projects/ (see crew_projects). Isolated in a git worktree by default.",
+				description:
+					"Project name under projects/ (see crew_projects). Isolated in a git worktree by default.",
 			}),
 		),
 		cwd: Type.Optional(
@@ -82,13 +87,21 @@ const crewSpawn = defineTool({
 					"Create a dedicated git worktree and crew/<id> branch. Defaults to the session config for project work.",
 			}),
 		),
+		delivery: Type.Optional(
+			Type.String({
+				description:
+					"How the work is handed over: pr (push and open a pull request), local (commit only), or report (no code change). Defaults to auto.",
+			}),
+		),
 		model: Type.Optional(
 			Type.String({
 				description: "Model for this crew member. Defaults to the session crew model.",
 			}),
 		),
 		thinking: Type.Optional(
-			Type.String({ description: "low|medium|high|xhigh|max. Defaults to the session crew thinking level." }),
+			Type.String({
+				description: "low|medium|high|xhigh|max. Defaults to the session crew thinking level.",
+			}),
 		),
 	}),
 	async execute(_id, params) {
@@ -97,6 +110,7 @@ const crewSpawn = defineTool({
 		else if (params.cwd) args.push("--cwd", params.cwd);
 		if (params.isolate === true) args.push("--isolate");
 		if (params.isolate === false) args.push("--no-isolate");
+		if (params.delivery) args.push("--delivery", params.delivery);
 		if (params.model) args.push("--model", params.model);
 		if (params.thinking) args.push("--thinking", params.thinking);
 		args.push("--", params.task);
@@ -153,11 +167,11 @@ const crewConfig = defineTool({
 	name: "crew_config",
 	label: "Crew settings",
 	description:
-		"The crew session settings: crewModel, crewThinking, crewApprove, " +
-		"crewIsolate, trustPaths and crewWake. Call it with no arguments to show " +
-		"them. When the captain says which model to run crew on, set crewModel " +
-		"(and crewThinking if they say how hard it should think). Thereafter every " +
-		"spawn uses it.",
+		"The crew session settings: crewModel, crewThinking, crewDelivery, " +
+		"crewIsolate, crewApprove, trustPaths, crewWake and crewWidget. Call it " +
+		"with no arguments to show them. When the captain says which model to run " +
+		"crew on, set crewModel (and crewThinking if they say how hard it should " +
+		"think). Thereafter every spawn uses it.",
 	parameters: Type.Object({
 		key: Type.Optional(Type.String({ description: "Setting to change; omit to show all" })),
 		value: Type.Optional(Type.String({ description: "New value" })),
@@ -209,6 +223,23 @@ const crewRead = defineTool({
 	},
 });
 
+const crewPrCheck = defineTool({
+	name: "crew_pr_check",
+	label: "Check crew PR",
+	description:
+		"Ask the forge whether a crew member's pull request has been merged or " +
+		"closed. Use it when the captain asks about a task in review. A merge settles " +
+		"the task and frees its pane and worktree; merging is the captain's act, not " +
+		"yours.",
+	parameters: Type.Object({
+		id: Type.String({ description: "Crew task id" }),
+	}),
+	async execute(_id, params) {
+		const text = await run("crew-pr-check.sh", [params.id]);
+		return { content: [{ type: "text", text }], details: undefined };
+	},
+});
+
 const crewSend = defineTool({
 	name: "crew_send",
 	label: "Steer crew",
@@ -252,12 +283,12 @@ const crewArchive = defineTool({
 	description:
 		"Retire a finished task out of the active board once the captain has what " +
 		"they need. Moves the task directory intact; deletes nothing. Pass worktree " +
-		"to also remove the crew's git worktree, which is refused while it has " +
-		"uncommitted changes unless force is set.",
+		"to also remove the crew's git worktree. Refused while the task is working or " +
+		"waiting on an unmerged pull request, unless force is set.",
 	parameters: Type.Object({
 		id: Type.String({ description: "Crew task id" }),
 		worktree: Type.Optional(Type.Boolean({ description: "Also remove the git worktree" })),
-		force: Type.Optional(Type.Boolean({ description: "Remove a dirty worktree anyway" })),
+		force: Type.Optional(Type.Boolean({ description: "Archive anyway (dirty or unmerged)" })),
 	}),
 	async execute(_id, params) {
 		const args = [params.id];
@@ -268,22 +299,97 @@ const crewArchive = defineTool({
 	},
 });
 
+// --- crew chrome (status line + widget) ------------------------------------
+//
+// Rendered straight from the task records: no Herdr call, no model call, no
+// tokens. The pane-existence refresh stays with crew_list, which is the only
+// reader that needs it.
+
+interface CrewRow {
+	id: string;
+	state: string;
+	note: string;
+}
+
+const ACTIVE_STATES = new Set(["queued", "working", "review", "blocked", "failed", "lost"]);
+
+function readBoard(): CrewRow[] {
+	let names: string[];
+	try {
+		names = fs.readdirSync(TASKS);
+	} catch {
+		return [];
+	}
+	const rows: CrewRow[] = [];
+	for (const id of names) {
+		try {
+			const raw = fs.readFileSync(path.join(TASKS, id, "status"), "utf8");
+			rows.push({
+				id,
+				state: /^state=(.*)$/m.exec(raw)?.[1] ?? "unknown",
+				note: /^note=(.*)$/m.exec(raw)?.[1] ?? "",
+			});
+		} catch {
+			/* a task without a status yet is not worth rendering */
+		}
+	}
+	return rows;
+}
+
+function configFlag(key: string, fallback: boolean): boolean {
+	try {
+		const cfg = JSON.parse(fs.readFileSync(path.join(HOME, "config.json"), "utf8")) as Record<
+			string,
+			unknown
+		>;
+		return typeof cfg[key] === "boolean" ? (cfg[key] as boolean) : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+function updateChrome(ctx: ExtensionContext) {
+	if (!ctx.hasUI) return;
+	const rows = readBoard();
+
+	if (rows.length === 0) {
+		ctx.ui.setStatus("foreman", undefined);
+		ctx.ui.setWidget("foreman", undefined);
+		return;
+	}
+
+	const counts = new Map<string, number>();
+	for (const row of rows) counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
+	const order = ["working", "review", "blocked", "queued", "failed", "lost"];
+	const bits: string[] = [];
+	for (const state of order) {
+		const n = counts.get(state);
+		if (n) bits.push(state === "working" ? `${n} working` : `${n} ${state}`);
+	}
+	ctx.ui.setStatus("foreman", `crew ${rows.length}${bits.length ? ` · ${bits.join(" · ")}` : ""}`);
+
+	if (!configFlag("crewWidget", true)) {
+		ctx.ui.setWidget("foreman", undefined);
+		return;
+	}
+	const active = rows
+		.filter((r) => ACTIVE_STATES.has(r.state))
+		.sort((a, b) => (a.state === b.state ? a.id.localeCompare(b.id) : a.state.localeCompare(b.state)))
+		.slice(0, 6)
+		.map((r) => `${r.id.padEnd(16)} ${r.state.padEnd(8)} ${r.note}`.trimEnd());
+	ctx.ui.setWidget("foreman", active.length ? active : undefined);
+}
+
 // --- auto wake -------------------------------------------------------------
 
 let watcher: ChildProcess | null = null;
 let stopping = false;
 let backoffMs = 1000;
+let chromeTimer: ReturnType<typeof setInterval> | null = null;
 
 function wakeEnabled(): boolean {
 	if (process.env.FOREMAN_WAKE === "0") return false;
-	try {
-		const cfg = JSON.parse(fs.readFileSync(path.join(HOME, "config.json"), "utf8")) as {
-			crewWake?: unknown;
-		};
-		return cfg.crewWake !== false;
-	} catch {
-		return true;
-	}
+	return configFlag("crewWake", true);
 }
 
 function startWatcher(pi: ExtensionAPI) {
@@ -338,17 +444,45 @@ export default function foreman(pi: ExtensionAPI) {
 	pi.registerTool(crewConfig);
 	pi.registerTool(crewPeek);
 	pi.registerTool(crewRead);
+	pi.registerTool(crewPrCheck);
 	pi.registerTool(crewSend);
 	pi.registerTool(crewStop);
 	pi.registerTool(crewArchive);
 
-	pi.on("session_start", async () => {
+	pi.registerCommand("crew", {
+		description: "Show the crew board; /crew on|off toggles the crew widget",
+		handler: async (args, ctx) => {
+			const arg = (args ?? "").trim().toLowerCase();
+			if (arg === "on" || arg === "off") {
+				await run("crew-config.sh", ["set", "crewWidget", arg === "on" ? "true" : "false"], 500);
+				updateChrome(ctx);
+				ctx.ui.notify(`crew widget ${arg}`, "info");
+				return;
+			}
+			const board = await run("crew-list.sh", [], 4000);
+			ctx.ui.notify(board, "info");
+		},
+	});
+
+	pi.on("session_start", async (_event, ctx) => {
 		stopping = false;
+		updateChrome(ctx);
 		startWatcher(pi);
+		if (!chromeTimer) {
+			chromeTimer = setInterval(() => updateChrome(ctx), 15_000);
+		}
+	});
+
+	pi.on("tool_execution_end", async (_event, ctx) => {
+		updateChrome(ctx);
 	});
 
 	pi.on("session_shutdown", async () => {
 		stopping = true;
+		if (chromeTimer) {
+			clearInterval(chromeTimer);
+			chromeTimer = null;
+		}
 		try {
 			watcher?.kill("SIGTERM");
 		} catch {

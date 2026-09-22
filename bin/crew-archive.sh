@@ -25,9 +25,15 @@ for a in "$@"; do
 done
 
 state=$(foreman_status_get "$ID" state)
+PR=$(foreman_meta_get "$ID" pr)
 case "$state" in
 working | queued)
   foreman_die "crew '$ID' is still $state; stop it first (crew-stop.sh $ID --close) or leave it alone"
+  ;;
+review)
+  if [ "$FORCE" != 1 ]; then
+    foreman_die "crew '$ID' is waiting on its pull request${PR:+ ($PR)}; merge or close it, or pass --force to archive anyway (the branch and commits survive)"
+  fi
   ;;
 esac
 

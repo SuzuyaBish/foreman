@@ -116,13 +116,31 @@ the endpoint, and labels are display only.
 
 ## Status model
 
-`queued → working → (blocked ↔ working) → done | failed | stopped | lost`
+`queued → working → (blocked ↔ working) → review → done`
+plus `failed`, `stopped`, `lost`.
 
-- `working/blocked/done/failed/stopped` are written by the crew through
-  `crew-report.sh`.
+- `working/blocked/review/done/failed/stopped` are written by the crew through
+  `crew-report.sh`; `review` records the pull request and holds the instance.
 - `lost` is derived by bash when the recorded pane no longer exists.
+- `review → done` is settled by `crew-pr-check.sh` polling the forge, so a merge
+  is what releases the worktree.
 - `idle` from Herdr is **never** treated as "done": a crew member between turns
   is idle and still working.
+
+## Delivery and the held instance
+
+A crew member works on `crew/<id>` in its own worktree. When its change is ready
+it pushes the branch, opens a pull request, and reports `review` with the PR url.
+The instance is deliberately held open past completion: the captain may want to
+read the diff, comment, or push the crew further. Only a merge, a close, or an
+explicit captain instruction releases it. Nothing is discarded on the way: the
+branch always survives, and archiving a task never deletes commits.
+
+## The chrome
+
+The status line and the crew widget are rendered from the task records on a
+local timer and after every tool call. They make no model call and no Herdr call,
+so supervision visibility costs nothing.
 
 ## What is deliberately absent
 

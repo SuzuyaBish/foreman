@@ -36,7 +36,7 @@ foreman_valid_id() {
 }
 
 foreman_valid_state() {
-  case "$1" in queued | working | blocked | done | failed | stopped | lost) return 0 ;; esac
+  case "$1" in queued | working | blocked | review | done | failed | stopped | lost) return 0 ;; esac
   return 1
 }
 

@@ -62,10 +62,31 @@ Told conversationally ("run the crew on X, thinking high"), persisted in
 |---|---|---|
 | `crewModel` | pi's default | model every crew member runs on |
 | `crewThinking` | pi's default | `low`…`max` |
+| `crewDelivery` | `auto` | `pr`, `local`, or `report` |
 | `crewIsolate` | `true` | worktree per crew member for project work |
 | `crewApprove` | `true` | pass `--approve`, so pi never shows a trust dialog |
 | `trustPaths` | `true` | pre-register worktree paths in pi's trust file |
 | `crewWake` | `true` | wake the foreman when crew state changes |
+| `crewWidget` | `true` | the crew list above the editor |
+
+## Delivery
+
+Work in a project is delivered as a pull request. A crew member commits on its
+`crew/<id>` branch, pushes, opens the PR, and finishes in state **`review`**.
+Its pane, worktree and branch all stay in place — the instance is kept open
+until the captain merges it. The watcher polls the PR and settles the task to
+`done` on merge, and the auto wake tells the foreman.
+
+A research task delivers a report instead (`done`, no PR); a project without a
+forge remote delivers locally. `crewDelivery` sets which is normal, and
+`crew_archive` refuses a task whose PR is still open.
+
+## The chrome
+
+While a session runs, a status line shows `crew 3 · 1 working · 1 review` and a
+widget lists the active crew above the editor. Both are rendered straight from
+the task records — no Herdr call, no model call, no tokens. `/crew` prints the
+board; `/crew on|off` toggles the widget.
 
 ## Pieces
 
@@ -79,6 +100,8 @@ Told conversationally ("run the crew on X, thinking high"), persisted in
 | `bin/crew-config.sh` | show / set crew settings |
 | `bin/crew-worktree.sh add\|remove` | the git worktree mechanics |
 | `bin/crew-trust.sh <path>` | pi folder-trust for a path |
+| `bin/crew-pr.sh <id> <url>` | *crew side:* record the pull request |
+| `bin/crew-pr-check.sh <id>` | has that pull request landed? |
 | `bin/crew-peek.sh <id> [n]` | bounded tail of the pane |
 | `bin/crew-send.sh <id> <text…>` | durable inbox record + doorbell |
 | `bin/crew-inbox.sh <id>` | *crew side:* read and acknowledge steers |

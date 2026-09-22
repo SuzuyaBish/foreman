@@ -12,7 +12,7 @@ set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"
 
-KEYS="crewModel crewThinking crewApprove crewIsolate trustPaths"
+KEYS="crewModel crewThinking crewApprove crewIsolate trustPaths crewDelivery"
 
 valid_key() {
   case " $KEYS " in *" $1 "*) return 0 ;; esac

@@ -28,6 +28,7 @@ if [ $# -ge 1 ]; then shift; fi
 CWD=
 PROJECT=
 ISOLATE=
+DELIVERY=
 MODEL=
 THINKING=
 BASE=HEAD
@@ -69,6 +70,11 @@ while [ $# -gt 0 ]; do
   --no-isolate)
     ISOLATE=0
     shift
+    ;;
+  --delivery)
+    need_val "$@"
+    DELIVERY=$2
+    shift 2
     ;;
   --)
     shift
@@ -142,6 +148,69 @@ QHOME="FOREMAN_HOME=$(printf '%q' "$FOREMAN_HOME")"
 REPORT_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-report.sh") $ID"
 INBOX_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-inbox.sh") $ID"
 
+# How this crew member hands its work over. `auto` prefers a pull request when
+# the directory is a git repo with an origin remote and gh is available;
+# otherwise the work stays local, or is report-only for a non-repository.
+[ -n "$DELIVERY" ] || DELIVERY=$(foreman_config_get crewDelivery || true)
+[ -n "$DELIVERY" ] || DELIVERY=auto
+if [ "$DELIVERY" = auto ]; then
+  if ! git -C "$CWD" rev-parse --git-dir >/dev/null 2>&1; then
+    DELIVERY=report
+  elif command -v gh >/dev/null 2>&1 && git -C "$CWD" remote get-url origin >/dev/null 2>&1; then
+    DELIVERY=pr
+  else
+    DELIVERY=local
+  fi
+fi
+case "$DELIVERY" in pr | local | report) ;; *) foreman_die "unknown delivery mode: $DELIVERY (pr|local|report)" ;; esac
+
+case "$DELIVERY" in
+pr)
+  DELIVERY_BLOCK=$(cat <<EOF
+## Finishing
+
+The change is not delivered until the captain merges a pull request for it. It
+lives on branch \`crew/$ID\` in an isolated git worktree.
+
+1. Commit everything on the branch; leave nothing uncommitted.
+2. Push it:  git push -u origin crew/$ID
+3. Open a pull request:
+     gh pr create --title "<short title>" --body "<what changed, why, how you verified it>"
+4. Record it and finish:
+     $REPORT_CMD review "<one-line summary>" --pr "<the pull request url>"
+
+Do not merge it — the captain does that. Leave the worktree, the branch and the
+commits exactly as they are; they are cleaned up after the merge.
+EOF
+)
+  ;;
+local)
+  DELIVERY_BLOCK=$(cat <<EOF
+## Finishing
+
+Your work is on branch \`crew/$ID\`. Commit everything, then finish with:
+
+  $REPORT_CMD done "<one-line summary>"
+
+Do not push and do not open a pull request. Leave the branch in place.
+EOF
+)
+  ;;
+report)
+  DELIVERY_BLOCK=$(cat <<EOF
+## Finishing
+
+The deliverable is the report file. Finish with:
+
+  $REPORT_CMD done "<one-line summary>"
+
+Do not commit, push, or open a pull request unless the task itself asks for a
+change to the code.
+EOF
+)
+  ;;
+esac
+
 cat >"$DIR/brief.md" <<EOF
 # Crew task: $ID
 
@@ -165,11 +234,7 @@ Write your result to:
 Keep it tight and decision-shaped: what you did or found, the evidence, what is
 still unresolved. This file is the deliverable.
 
-## When you finish
-
-Run exactly this:
-
-  $REPORT_CMD done "<one-line summary>"
+$DELIVERY_BLOCK
 
 If you cannot proceed without a decision, run:
 
@@ -220,6 +285,7 @@ fi
   [ -z "$WT" ] || printf 'branch=crew/%s\n' "$ID"
   [ -z "$MODEL" ] || printf 'model=%s\n' "$MODEL"
   [ -z "$THINKING" ] || printf 'thinking=%s\n' "$THINKING"
+  printf 'delivery=%s\n' "$DELIVERY"
   printf 'created=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"$DIR/meta"
 
@@ -247,3 +313,4 @@ printf 'spawned %s pane=%s:%s\n' "$ID" "$FOREMAN_SESSION" "$PANE"
 printf 'cwd %s\n' "$CWD"
 [ -z "$WT" ] || printf 'worktree %s on branch crew/%s\n' "$WT" "$ID"
 [ -z "$MODEL" ] || printf 'model %s\n' "$MODEL"
+printf 'delivery %s\n' "$DELIVERY"
