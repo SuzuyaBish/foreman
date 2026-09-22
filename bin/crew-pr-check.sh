@@ -36,13 +36,13 @@ DRAFT=$(printf '%s' "$JSON" | jq -r '.isDraft // false')
 
 case "$STATE" in
 MERGED)
-  foreman_status_set "$ID" done "PR merged: $PR"
-  printf '%s  done  PR merged: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PR" >>"$DIR/events"
+  foreman_event_append "$ID" done "" "PR merged: $PR"
+  foreman_status_sync "$ID"
   printf 'merged\n'
   ;;
 CLOSED)
-  foreman_status_set "$ID" done "PR closed without merge: $PR"
-  printf '%s  done  PR closed without merge: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PR" >>"$DIR/events"
+  foreman_event_append "$ID" done "" "PR closed without merge: $PR"
+  foreman_status_sync "$ID"
   printf 'closed\n'
   ;;
 OPEN)

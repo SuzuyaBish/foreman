@@ -48,8 +48,14 @@ if [ "$DROP_WT" = 1 ]; then
   fi
 fi
 
+# Reconcile the todo list while the crew's own record is still readable, so no
+# row is left pointing at a task that has been moved away.
+"$FOREMAN_ROOT/bin/crew-todo.sh" sync >/dev/null 2>&1 || true
+
 DEST="$FOREMAN_HOME/archive"
 mkdir -p "$DEST"
 [ ! -e "$DEST/$ID" ] || foreman_die "$DEST/$ID already exists; nothing was moved"
+GEN=$(cat "$DIR/busy-gen" 2>/dev/null || printf '')
+[ -z "$GEN" ] || "$FOREMAN_ROOT/bin/crew-busy-event.sh" retire "$FOREMAN_HOME" "$ID" --gen "$GEN" >/dev/null 2>&1 || true
 mv "$DIR" "$DEST/$ID"
 printf 'archived %s -> %s/%s\n' "$ID" "$DEST" "$ID"

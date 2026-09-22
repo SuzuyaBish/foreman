@@ -9,13 +9,11 @@
 #   --cwd <path>       explicit working directory
 #   --isolate          force a git worktree (needs --project)
 #   --no-isolate       work directly in the project checkout
+#   --delivery <mode>  pr | local | report | auto (default)
 #   --base <ref>       worktree base (default HEAD)
 #   --model <model>    model for this crew member (default: config crewModel)
 #   --thinking <lvl>   low|medium|high|xhigh|max (default: config crewThinking)
 #   -- <text>          everything after this is task text
-#
-# Model, thinking level, folder-trust approval, and worktree isolation all fall
-# back to crew-config.sh, so the captain can say "run the crew on X" once.
 set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"
@@ -36,31 +34,22 @@ PARTS=()
 seen_target=0
 while [ $# -gt 0 ]; do
   case "$1" in
-  --project)
+  --project | --cwd | --model | --thinking | --base | --delivery)
     need_val "$@"
-    PROJECT=$2
-    seen_target=1
-    shift 2
-    ;;
-  --cwd)
-    need_val "$@"
-    CWD=$2
-    seen_target=1
-    shift 2
-    ;;
-  --model)
-    need_val "$@"
-    MODEL=$2
-    shift 2
-    ;;
-  --thinking)
-    need_val "$@"
-    THINKING=$2
-    shift 2
-    ;;
-  --base)
-    need_val "$@"
-    BASE=$2
+    case "$1" in
+    --project)
+      PROJECT=$2
+      seen_target=1
+      ;;
+    --cwd)
+      CWD=$2
+      seen_target=1
+      ;;
+    --model) MODEL=$2 ;;
+    --thinking) THINKING=$2 ;;
+    --base) BASE=$2 ;;
+    --delivery) DELIVERY=$2 ;;
+    esac
     shift 2
     ;;
   --isolate)
@@ -70,11 +59,6 @@ while [ $# -gt 0 ]; do
   --no-isolate)
     ISOLATE=0
     shift
-    ;;
-  --delivery)
-    need_val "$@"
-    DELIVERY=$2
-    shift 2
     ;;
   --)
     shift
@@ -108,7 +92,6 @@ if [ -z "$PROJECT" ] && [ -z "$CWD" ]; then
   foreman_die "give a working directory or --project <name>; see crew-projects.sh"
 fi
 
-# Defaults from the session config.
 [ -n "$MODEL" ] || MODEL=$(foreman_config_get crewModel || true)
 [ -n "$THINKING" ] || THINKING=$(foreman_config_get crewThinking || true)
 if [ -z "$ISOLATE" ]; then
@@ -121,8 +104,6 @@ fi
 if [ "$ISOLATE" = 1 ] && [ -z "$PROJECT" ]; then
   foreman_die "--isolate needs --project (a worktree is cut from a project checkout)"
 fi
-APPROVE=$(foreman_config_bool crewApprove 1)
-TRUST_PATHS=$(foreman_config_bool trustPaths 1)
 
 DIR=$(foreman_task_dir "$ID")
 [ ! -e "$DIR" ] || foreman_die "crew task '$ID' already exists; archive it or pick another id"
@@ -141,16 +122,8 @@ CWD=$(cd "$CWD" && pwd -P)
 mkdir -p "$DIR/inbox/handled"
 printf '%s\n' "$TASK" >"$DIR/task.md"
 
-# The crew member runs its own shell, so every command it is told to run must
-# carry this session's FOREMAN_HOME explicitly rather than relying on the
-# default derived from the script location.
-QHOME="FOREMAN_HOME=$(printf '%q' "$FOREMAN_HOME")"
-REPORT_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-report.sh") $ID"
-INBOX_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-inbox.sh") $ID"
-
 # How this crew member hands its work over. `auto` prefers a pull request when
-# the directory is a git repo with an origin remote and gh is available;
-# otherwise the work stays local, or is report-only for a non-repository.
+# the directory is a git repo with an origin remote and gh is available.
 [ -n "$DELIVERY" ] || DELIVERY=$(foreman_config_get crewDelivery || true)
 [ -n "$DELIVERY" ] || DELIVERY=auto
 if [ "$DELIVERY" = auto ]; then
@@ -163,6 +136,10 @@ if [ "$DELIVERY" = auto ]; then
   fi
 fi
 case "$DELIVERY" in pr | local | report) ;; *) foreman_die "unknown delivery mode: $DELIVERY (pr|local|report)" ;; esac
+
+QHOME="FOREMAN_HOME=$(printf '%q' "$FOREMAN_HOME")"
+REPORT_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-report.sh") $ID"
+INBOX_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-inbox.sh") $ID"
 
 case "$DELIVERY" in
 pr)
@@ -236,11 +213,19 @@ still unresolved. This file is the deliverable.
 
 $DELIVERY_BLOCK
 
-If you cannot proceed without a decision, run:
+## Decisions
+
+If you hit a choice that is not yours to make, ask for it instead of guessing:
+
+  $REPORT_CMD needs-decision "<the question>" --key <short-key>
+
+Then stop and wait. The captain's answer arrives in your inbox as a resolved
+decision; check the inbox before resuming. Reuse the same key if you have to ask
+again about the same thing.
+
+If you simply cannot proceed, use \`blocked\` instead:
 
   $REPORT_CMD blocked "<one-line reason>"
-
-and stop. Do not guess at a decision that is not yours to make.
 
 ## New instructions
 
@@ -255,61 +240,49 @@ Check for them between significant steps:
 That prints every unacknowledged instruction and marks it handled. Run it before
 starting anything long, and again after finishing a step.
 
+## Visual work
+
+If your deliverable is visual — a UI mock, a plan, a comparison, a review surface
+— build it as an HTML artifact and open a Lavish board with the \`lavish_open\`
+tool, then call \`lavish_poll\` once and leave it running. The captain annotates
+the page and the feedback comes back to you. Report what you need reviewed as
+
+  $REPORT_CMD needs-decision "<what you need reviewed>" --key board-url
+
+after opening the board, and use the tool rather than a shell poll.
+
 ## Rules
 
 - Work only inside $CWD unless the task says otherwise.
 - Do not ask the captain questions in chat. Use crew-report.sh.
 - A done status with no report is a failed task.
+- Never merge a pull request yourself.
 EOF
 
-foreman_status_set "$ID" queued "brief written"
-
-WS=$(foreman_workspace)
-OUT=$(foreman_herdr tab create --workspace "$WS" --cwd "$CWD" --label "crew-$ID" --no-focus 2>/dev/null) ||
-  foreman_die "herdr tab create failed in workspace $WS (session $FOREMAN_SESSION)"
-TAB=$(printf '%s' "$OUT" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
-PANE=$(printf '%s' "$OUT" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
-if [ -z "$TAB" ] || [ -z "$PANE" ]; then
-  foreman_die "herdr returned no tab/pane id: $OUT"
-fi
-
 {
-  printf 'pane=%s:%s\n' "$FOREMAN_SESSION" "$PANE"
-  printf 'tab=%s\n' "$TAB"
-  printf 'workspace=%s\n' "$WS"
-  printf 'session=%s\n' "$FOREMAN_SESSION"
-  printf 'cwd=%s\n' "$CWD"
   printf 'harness=pi\n'
+  printf 'created=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'delivery=%s\n' "$DELIVERY"
   [ -z "$PROJ" ] || printf 'project=%s\n' "$PROJ"
   [ -z "$WT" ] || printf 'worktree=%s\n' "$WT"
   [ -z "$WT" ] || printf 'branch=crew/%s\n' "$ID"
   [ -z "$MODEL" ] || printf 'model=%s\n' "$MODEL"
   [ -z "$THINKING" ] || printf 'thinking=%s\n' "$THINKING"
-  printf 'delivery=%s\n' "$DELIVERY"
-  printf 'created=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"$DIR/meta"
 
-# Pre-register folder trust so nobody is prompted, including a human who later
-# attaches to this pane. Best effort: a failure must not fail the spawn.
-if [ "$TRUST_PATHS" = 1 ] && [ -d "$HOME/.pi" ]; then
-  "$FOREMAN_ROOT/bin/crew-trust.sh" "$CWD" >/dev/null 2>&1 || true
-fi
+# Arm the busy incarnation before the launch, so the extension the crew member
+# runs with carries a token that this task alone owns.
+GEN=$("$FOREMAN_ROOT/bin/crew-busy-event.sh" arm "$FOREMAN_HOME" "$ID" --state busy --source fm-spawn --event launch-brief) ||
+  foreman_die "could not arm the busy record for '$ID'"
+foreman_meta_set "$ID" busy_gen "$GEN"
+"$FOREMAN_ROOT/bin/crew-pi-ext.sh" "$ID" "$GEN" >/dev/null ||
+  foreman_die "could not write the crew extension for '$ID'"
 
-POINTER="Read $DIR/brief.md and follow it exactly. It describes your whole task."
-CMD="${FOREMAN_PI_BIN:-pi}"
-[ "$APPROVE" != 1 ] || CMD="$CMD --approve"
-[ -z "$MODEL" ] || CMD="$CMD --model $(printf '%q' "$MODEL")"
-[ -z "$THINKING" ] || CMD="$CMD --thinking $(printf '%q' "$THINKING")"
-CMD="$CMD $(printf '%q' "$POINTER")"
+LAUNCH_ARGS=()
+[ -z "$MODEL" ] || LAUNCH_ARGS+=(--model "$MODEL")
+[ -z "$THINKING" ] || LAUNCH_ARGS+=(--thinking "$THINKING")
+"$FOREMAN_ROOT/bin/crew-launch.sh" "$ID" "$CWD" ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
 
-if ! foreman_herdr pane run "$PANE" "$CMD" >/dev/null 2>&1; then
-  foreman_herdr tab close "$TAB" >/dev/null 2>&1 || true
-  foreman_status_set "$ID" failed "launch command could not be sent"
-  foreman_die "pane $PANE was created but the launch command could not be sent; the tab was closed"
-fi
-
-foreman_status_set "$ID" working "spawned"
-printf 'spawned %s pane=%s:%s\n' "$ID" "$FOREMAN_SESSION" "$PANE"
 printf 'cwd %s\n' "$CWD"
 [ -z "$WT" ] || printf 'worktree %s on branch crew/%s\n' "$WT" "$ID"
 [ -z "$MODEL" ] || printf 'model %s\n' "$MODEL"

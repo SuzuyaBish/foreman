@@ -1,13 +1,15 @@
 /**
- * foreman - crew tools, auto wake, and the zero-token crew chrome.
+ * foreman - crew tools, todo list, auto wake, and the zero-token chrome.
  *
  * Every tool shells out to a zero-token bash script under ../bin and returns a
  * hard-capped string. Crew output never streams into this conversation: a crew
  * member's report is only ever read by an explicit crew_read call.
  *
- * The same extension owns the auto wake (a one-shot bash watcher kept as a
- * child, whose single line is injected) and the status line/widget, which are
- * rendered from the task records directly and cost no tokens at all.
+ * The same extension owns:
+ *   * the auto wake — a one-shot bash watcher kept as a child, whose durable
+ *     rows are drained by the foreman rather than injected as payload;
+ *   * the status line and widget, rendered from the task and todo records
+ *     directly, so fleet visibility costs no tokens.
  *
  * See ../DESIGN.md for the context contract this exists to enforce.
  */
@@ -27,6 +29,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = path.join(ROOT, "bin");
 const HOME = process.env.FOREMAN_HOME ?? path.join(ROOT, ".foreman");
 const TASKS = path.join(HOME, "tasks");
+const TODO = path.join(HOME, "todo.tsv");
 
 /** Hard ceiling on anything a tool may put into the foreman's context. */
 const CAP = 4000;
@@ -36,17 +39,11 @@ function run(script: string, args: string[], cap = CAP): Promise<string> {
 		execFile(
 			path.join(BIN, script),
 			args,
-			{
-				cwd: ROOT,
-				maxBuffer: 4 * 1024 * 1024,
-				env: { ...process.env, FOREMAN_ROOT: ROOT },
-			},
+			{ cwd: ROOT, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, FOREMAN_ROOT: ROOT } },
 			(error, stdout, stderr) => {
 				const body = `${stdout ?? ""}${stderr ?? ""}`.trim();
 				const text =
-					body.length > cap
-						? `${body.slice(0, cap)}\n…[capped at ${cap} chars]`
-						: body;
+					body.length > cap ? `${body.slice(0, cap)}\n…[capped at ${cap} chars]` : body;
 				if (error && !stdout) {
 					reject(new Error(text || String(error)));
 					return;
@@ -57,52 +54,96 @@ function run(script: string, args: string[], cap = CAP): Promise<string> {
 	});
 }
 
-// --- tools -----------------------------------------------------------------
+function one(name: string, label: string, description: string, parameters: any, script: string, args: (p: any) => string[]) {
+	return defineTool({
+		name,
+		label,
+		description,
+		parameters,
+		async execute(_id: string, params: any) {
+			const text = await run(script, args(params ?? {}));
+			return { content: [{ type: "text", text }], details: undefined };
+		},
+	});
+}
+
+// --- todo list -------------------------------------------------------------
+
+const crewTodo = defineTool({
+	name: "crew_todo",
+	label: "Todo list",
+	description:
+		"The durable project todo list. It outlives this session: a new session reads " +
+		"it and knows what is queued, in flight, and finished. Use `action: add` to " +
+		"capture requirements as items, `list` to answer what is left, `start` to link " +
+		"an item to the crew member working on it, and `done`/`open`/`drop` to settle " +
+		"one by hand. Rows linked to crew are reconciled automatically.",
+	parameters: Type.Object({
+		action: Type.String({
+			description: "add | list | start | done | open | drop",
+		}),
+		items: Type.Optional(
+			Type.Array(Type.String(), {
+				description: "For add: one or more item texts, in order",
+			}),
+		),
+		id: Type.Optional(Type.Number({ description: "Item number, for start/done/open/drop" })),
+		crew: Type.Optional(
+			Type.String({ description: "For start: the crew task id doing the work" }),
+		),
+		show: Type.Optional(
+			Type.String({ description: "For list: all (default) or open" }),
+		),
+	}),
+	async execute(_id, params) {
+		const action = params.action;
+		if (action === "add") {
+			const items: string[] = params.items?.length ? params.items : [];
+			if (items.length === 0) throw new Error("add needs one or more items");
+			const out: string[] = [];
+			for (const item of items) out.push(await run("crew-todo.sh", ["add", item], 500));
+			return { content: [{ type: "text", text: out.join("\n") }], details: undefined };
+		}
+		if (action === "list") {
+			const text = await run("crew-todo.sh", ["list", params.show === "open" ? "--open" : "--all"]);
+			return { content: [{ type: "text", text }], details: undefined };
+		}
+		if (action === "start") {
+			if (params.id === undefined || !params.crew) throw new Error("start needs id and crew");
+			const text = await run("crew-todo.sh", ["start", String(params.id), params.crew], 500);
+			return { content: [{ type: "text", text }], details: undefined };
+		}
+		if (["done", "open", "drop"].includes(action)) {
+			if (params.id === undefined) throw new Error(`${action} needs id`);
+			const text = await run("crew-todo.sh", [action, String(params.id)], 500);
+			return { content: [{ type: "text", text }], details: undefined };
+		}
+		throw new Error(`unknown todo action: ${action}`);
+	},
+});
+
+// --- crew ------------------------------------------------------------------
 
 const crewSpawn = defineTool({
 	name: "crew_spawn",
 	label: "Spawn crew",
 	description:
-		"Start a new crew member: a separate pi process in its own Herdr pane with " +
-		"an isolated context. It receives only the task text you pass. Its output " +
-		"goes to a report file, never to you. Give it a project (preferred) or an " +
-		"explicit cwd. Use a short kebab-case id that describes the work.",
+		"Start a new crew member: a separate pi process in its own Herdr pane with an " +
+		"isolated context. It receives only the task text you pass. Its output goes to " +
+		"a report file, never to you. Give it a project (preferred) or an explicit " +
+		"cwd, and pass `todo` to link the item it is working on.",
 	parameters: Type.Object({
 		id: Type.String({ description: "Short kebab-case task id, e.g. auth-flake" }),
 		task: Type.String({
 			description: "The complete requirement. It is the crew member's whole context.",
 		}),
-		project: Type.Optional(
-			Type.String({
-				description:
-					"Project name under projects/ (see crew_projects). Isolated in a git worktree by default.",
-			}),
-		),
-		cwd: Type.Optional(
-			Type.String({ description: "Explicit working directory, when the work is not in a project" }),
-		),
-		isolate: Type.Optional(
-			Type.Boolean({
-				description:
-					"Create a dedicated git worktree and crew/<id> branch. Defaults to the session config for project work.",
-			}),
-		),
-		delivery: Type.Optional(
-			Type.String({
-				description:
-					"How the work is handed over: pr (push and open a pull request), local (commit only), or report (no code change). Defaults to auto.",
-			}),
-		),
-		model: Type.Optional(
-			Type.String({
-				description: "Model for this crew member. Defaults to the session crew model.",
-			}),
-		),
-		thinking: Type.Optional(
-			Type.String({
-				description: "low|medium|high|xhigh|max. Defaults to the session crew thinking level.",
-			}),
-		),
+		project: Type.Optional(Type.String({ description: "Project name under projects/ (see crew_projects)" })),
+		cwd: Type.Optional(Type.String({ description: "Explicit working directory" })),
+		isolate: Type.Optional(Type.Boolean({ description: "Create a dedicated git worktree and crew/<id> branch" })),
+		delivery: Type.Optional(Type.String({ description: "pr | local | report (default: auto)" })),
+		model: Type.Optional(Type.String({ description: "Model for this crew member" })),
+		thinking: Type.Optional(Type.String({ description: "low|medium|high|xhigh|max" })),
+		todo: Type.Optional(Type.Number({ description: "Todo item number this work fulfils" })),
 	}),
 	async execute(_id, params) {
 		const args = [params.id];
@@ -114,7 +155,15 @@ const crewSpawn = defineTool({
 		if (params.model) args.push("--model", params.model);
 		if (params.thinking) args.push("--thinking", params.thinking);
 		args.push("--", params.task);
-		const text = await run("crew-spawn.sh", args);
+		let text = await run("crew-spawn.sh", args);
+		if (params.todo !== undefined) {
+			try {
+				const linked = await run("crew-todo.sh", ["start", String(params.todo), params.id], 300);
+				text += `\n${linked}`;
+			} catch (error) {
+				text += `\nwarning: could not link todo #${params.todo}: ${String(error)}`;
+			}
+		}
 		return { content: [{ type: "text", text }], details: undefined };
 	},
 });
@@ -123,9 +172,9 @@ const crewList = defineTool({
 	name: "crew_list",
 	label: "Crew board",
 	description:
-		"The whole fleet as one line per crew member: id, state, age, note. This is " +
-		"your default look and your only memory of the fleet — prefer it over " +
-		"recalling earlier turns. Also refreshes the pane-existence check.",
+		"The todo list plus the whole fleet as one line per crew member: id, state, " +
+		"age, busy, note. This is your default look and your only memory of the fleet " +
+		"— prefer it over recalling earlier turns. Also refreshes endpoint checks.",
 	parameters: Type.Object({}),
 	async execute() {
 		const text = await run("crew-list.sh", []);
@@ -133,126 +182,129 @@ const crewList = defineTool({
 	},
 });
 
-const crewProjects = defineTool({
-	name: "crew_projects",
-	label: "Projects",
-	description:
-		"The projects available to put crew to work in, one line each. Call this " +
-		"before spawning when you are not certain of the project name.",
-	parameters: Type.Object({
-		filter: Type.Optional(Type.String({ description: "Only names containing this text" })),
-	}),
-	async execute(_id, params) {
-		const text = await run("crew-projects.sh", params.filter ? [params.filter] : []);
-		return { content: [{ type: "text", text }], details: undefined };
-	},
-});
+const crewProjects = one(
+	"crew_projects",
+	"Projects",
+	"The projects available to put crew to work in, one line each.",
+	Type.Object({ filter: Type.Optional(Type.String()) }),
+	"crew-projects.sh",
+	(p) => (p.filter ? [p.filter] : []),
+);
 
-const crewModels = defineTool({
-	name: "crew_models",
-	label: "Available models",
-	description:
-		"The models pi can run. Use it to resolve a model the captain names before " +
-		"setting it with crew_config, or before passing one to crew_spawn.",
-	parameters: Type.Object({
-		search: Type.Optional(Type.String({ description: "Substring filter" })),
-	}),
-	async execute(_id, params) {
-		const text = await run("crew-models.sh", params.search ? [params.search] : [], 2500);
-		return { content: [{ type: "text", text }], details: undefined };
-	},
-});
+const crewModels = one(
+	"crew_models",
+	"Available models",
+	"The models pi can run. Use it to resolve a model the captain names.",
+	Type.Object({ search: Type.Optional(Type.String()) }),
+	"crew-models.sh",
+	(p) => (p.search ? [p.search] : []),
+);
 
 const crewConfig = defineTool({
 	name: "crew_config",
 	label: "Crew settings",
 	description:
-		"The crew session settings: crewModel, crewThinking, crewDelivery, " +
-		"crewIsolate, crewApprove, trustPaths, crewWake and crewWidget. Call it " +
-		"with no arguments to show them. When the captain says which model to run " +
-		"crew on, set crewModel (and crewThinking if they say how hard it should " +
-		"think). Thereafter every spawn uses it.",
+		"The crew session settings: crewModel, crewThinking, crewDelivery, crewIsolate, " +
+		"crewApprove, trustPaths, crewWake, crewWidget. Call with no arguments to show " +
+		"them. When the captain says which model to run crew on, set crewModel.",
 	parameters: Type.Object({
-		key: Type.Optional(Type.String({ description: "Setting to change; omit to show all" })),
-		value: Type.Optional(Type.String({ description: "New value" })),
+		key: Type.Optional(Type.String()),
+		value: Type.Optional(Type.String()),
 	}),
 	async execute(_id, params) {
-		if (!params.key) {
-			const text = await run("crew-config.sh", ["show"], 1500);
-			return { content: [{ type: "text", text }], details: undefined };
+		if (!params.key) return { content: [{ type: "text", text: await run("crew-config.sh", ["show"], 1500) }], details: undefined };
+		if (params.value === undefined)
+			return { content: [{ type: "text", text: await run("crew-config.sh", ["get", params.key], 1500) }], details: undefined };
+		return { content: [{ type: "text", text: await run("crew-config.sh", ["set", params.key, params.value], 1500) }], details: undefined };
+	},
+});
+
+const crewPeek = one(
+	"crew_peek",
+	"Peek at crew",
+	"Bounded tail of one crew member's terminal. Inspection only — use it when the captain asks what a crew is doing, or to diagnose a stall.",
+	Type.Object({ id: Type.String(), lines: Type.Optional(Type.Number()) }),
+	"crew-peek.sh",
+	(p) => [p.id, String(p.lines ?? 40)],
+);
+
+const crewRead = one(
+	"crew_read",
+	"Read crew report",
+	"Read a crew member's report. The one place crew output enters your context; call it only when the captain asks or you must decide something.",
+	Type.Object({ id: Type.String() }),
+	"crew-read.sh",
+	(p) => [p.id],
+);
+
+const crewBusy = one(
+	"crew_busy",
+	"Ask what a crew is doing",
+	"Whether a crew member is mid-turn (busy), settled and waiting (idle), gone (dead), or unknown — with the source that produced it. Use it to tell a working crew from one that has stalled at its prompt.",
+	Type.Object({ id: Type.String() }),
+	"crew-busy.sh",
+	(p) => [p.id],
+);
+
+const crewPrCheck = one(
+	"crew_pr_check",
+	"Check crew PR",
+	"Ask the forge whether a crew member's pull request has been merged or closed.",
+	Type.Object({ id: Type.String() }),
+	"crew-pr-check.sh",
+	(p) => [p.id],
+);
+
+const crewSend = one(
+	"crew_send",
+	"Steer crew",
+	"Send an instruction to a running crew member. It is written durably and a doorbell is rung; the crew acknowledges by reading it.",
+	Type.Object({ id: Type.String(), text: Type.String() }),
+	"crew-send.sh",
+	(p) => [p.id, p.text],
+);
+
+const crewDecide = defineTool({
+	name: "crew_decide",
+	label: "Answer a crew decision",
+	description:
+		"Answer a question a crew member asked. The decision closes with the answer and " +
+		"the crew receives it in its inbox — one act, so the board can never show a " +
+		"decision that has already been answered. `crew_decide` with no id lists every " +
+		"open decision across the fleet.",
+	parameters: Type.Object({
+		list: Type.Optional(Type.Boolean({ description: "List open decisions instead" })),
+		id: Type.Optional(Type.String({ description: "Crew task id" })),
+		key: Type.Optional(Type.String({ description: "The decision key the crew used" })),
+		answer: Type.Optional(Type.String({ description: "The answer to deliver" })),
+	}),
+	async execute(_id, params) {
+		if (params.list || !params.id) {
+			return { content: [{ type: "text", text: await run("crew-decide.sh", ["--list"]) }], details: undefined };
 		}
-		if (params.value === undefined) {
-			const text = await run("crew-config.sh", ["get", params.key], 1500);
-			return { content: [{ type: "text", text }], details: undefined };
-		}
-		const text = await run("crew-config.sh", ["set", params.key, params.value], 1500);
+		if (!params.key || !params.answer) throw new Error("crew_decide needs key and answer");
+		const text = await run("crew-decide.sh", [params.id, params.key, params.answer], 800);
 		return { content: [{ type: "text", text }], details: undefined };
 	},
 });
 
-const crewPeek = defineTool({
-	name: "crew_peek",
-	label: "Peek at crew",
+const crewMerge = defineTool({
+	name: "crew_merge",
+	label: "Merge crew PR",
 	description:
-		"Bounded tail of one crew member's terminal. Inspection only — use it when " +
-		"the captain asks what a crew is doing right now, or to diagnose a stall. " +
-		"Do not call it speculatively.",
+		"Merge a crew member's pull request and settle the task. ONLY call this when " +
+		"the captain has explicitly authorised the merge — merging is their decision, " +
+		"not yours. The branch is kept unless they ask for it to be deleted.",
 	parameters: Type.Object({
 		id: Type.String({ description: "Crew task id" }),
-		lines: Type.Optional(Type.Number({ description: "Lines to show (default 40, max 200)" })),
+		method: Type.Optional(Type.String({ description: "squash (default) | merge | rebase" })),
+		delete_branch: Type.Optional(Type.Boolean({ description: "Also delete the branch (removes the worktree first)" })),
 	}),
 	async execute(_id, params) {
-		const text = await run("crew-peek.sh", [params.id, String(params.lines ?? 40)]);
-		return { content: [{ type: "text", text }], details: undefined };
-	},
-});
-
-const crewRead = defineTool({
-	name: "crew_read",
-	label: "Read crew report",
-	description:
-		"Read a crew member's report. This is the one place crew output enters your " +
-		"context, so call it only when the captain asks for that crew's findings or " +
-		"you must decide something. Output is truncated; the full path is printed.",
-	parameters: Type.Object({
-		id: Type.String({ description: "Crew task id" }),
-	}),
-	async execute(_id, params) {
-		const text = await run("crew-read.sh", [params.id]);
-		return { content: [{ type: "text", text }], details: undefined };
-	},
-});
-
-const crewPrCheck = defineTool({
-	name: "crew_pr_check",
-	label: "Check crew PR",
-	description:
-		"Ask the forge whether a crew member's pull request has been merged or " +
-		"closed. Use it when the captain asks about a task in review. A merge settles " +
-		"the task and frees its pane and worktree; merging is the captain's act, not " +
-		"yours.",
-	parameters: Type.Object({
-		id: Type.String({ description: "Crew task id" }),
-	}),
-	async execute(_id, params) {
-		const text = await run("crew-pr-check.sh", [params.id]);
-		return { content: [{ type: "text", text }], details: undefined };
-	},
-});
-
-const crewSend = defineTool({
-	name: "crew_send",
-	label: "Steer crew",
-	description:
-		"Send an instruction to a running crew member. It is written durably and a " +
-		"doorbell is rung in its pane; the crew acknowledges by reading it. Use this " +
-		"for direction, constraints, or answers — not for stopping a crew.",
-	parameters: Type.Object({
-		id: Type.String({ description: "Crew task id" }),
-		text: Type.String({ description: "The instruction to deliver" }),
-	}),
-	async execute(_id, params) {
-		const text = await run("crew-send.sh", [params.id, params.text]);
+		const args = [params.id];
+		if (params.method) args.push("--method", params.method);
+		if (params.delete_branch) args.push("--delete-branch");
+		const text = await run("crew-merge.sh", args, 2000);
 		return { content: [{ type: "text", text }], details: undefined };
 	},
 });
@@ -261,14 +313,11 @@ const crewStop = defineTool({
 	name: "crew_stop",
 	label: "Stop crew",
 	description:
-		"Stop a crew member. interrupt (default) cancels the current turn and leaves " +
-		"the agent running; exit quits the agent but keeps its pane, directory and " +
-		"files; close also closes the tab. Confirmations are reported honestly.",
+		"Stop a crew member. interrupt (default) cancels the current turn; exit quits " +
+		"the agent but keeps its pane, directory and files; close also closes the tab.",
 	parameters: Type.Object({
-		id: Type.String({ description: "Crew task id" }),
-		mode: Type.Optional(
-			Type.String({ description: "interrupt | exit | close (default interrupt)" }),
-		),
+		id: Type.String(),
+		mode: Type.Optional(Type.String({ description: "interrupt | exit | close" })),
 	}),
 	async execute(_id, params) {
 		const mode = params.mode ? `--${params.mode.replace(/^--/, "")}` : "--interrupt";
@@ -281,14 +330,13 @@ const crewArchive = defineTool({
 	name: "crew_archive",
 	label: "Archive crew",
 	description:
-		"Retire a finished task out of the active board once the captain has what " +
-		"they need. Moves the task directory intact; deletes nothing. Pass worktree " +
-		"to also remove the crew's git worktree. Refused while the task is working or " +
-		"waiting on an unmerged pull request, unless force is set.",
+		"Retire a finished task out of the active board. Moves the task directory " +
+		"intact; deletes nothing. Pass worktree to also remove its git worktree. " +
+		"Refused while working or waiting on an unmerged pull request unless force.",
 	parameters: Type.Object({
-		id: Type.String({ description: "Crew task id" }),
-		worktree: Type.Optional(Type.Boolean({ description: "Also remove the git worktree" })),
-		force: Type.Optional(Type.Boolean({ description: "Archive anyway (dirty or unmerged)" })),
+		id: Type.String(),
+		worktree: Type.Optional(Type.Boolean()),
+		force: Type.Optional(Type.Boolean()),
 	}),
 	async execute(_id, params) {
 		const args = [params.id];
@@ -299,11 +347,89 @@ const crewArchive = defineTool({
 	},
 });
 
-// --- crew chrome (status line + widget) ------------------------------------
-//
-// Rendered straight from the task records: no Herdr call, no model call, no
-// tokens. The pane-existence refresh stays with crew_list, which is the only
-// reader that needs it.
+const crewRecover = defineTool({
+	name: "crew_recover",
+	label: "Recover crew",
+	description:
+		"Reconcile the fleet after a crash or a lost terminal: report which tasks have " +
+		"no endpoint, or relaunch one in its existing worktree with a progress note so " +
+		"its commits and uncommitted work survive.",
+	parameters: Type.Object({
+		id: Type.Optional(Type.String({ description: "Relaunch this crew task; omit to scan" })),
+		force: Type.Optional(Type.Boolean({ description: "Relaunch even if a pane is still reachable" })),
+	}),
+	async execute(_id, params) {
+		const args: string[] = [];
+		if (params.id) args.push("--relaunch", params.id);
+		if (params.force) args.push("--force");
+		const text = await run("crew-recover.sh", args, 2000);
+		return { content: [{ type: "text", text }], details: undefined };
+	},
+});
+
+const crewWakeDrain = one(
+	"crew_wake_drain",
+	"Drain wakes",
+	"Show the wake rows waiting for you and the sequence to acknowledge. Rows are durable and re-present until acknowledged, so a crash cannot lose them.",
+	Type.Object({ ack: Type.Optional(Type.Number({ description: "Acknowledge through this sequence" })) }),
+	"crew-queue.sh",
+	(p) => (p.ack === undefined ? ["list"] : ["ack", String(p.ack)]),
+);
+
+// --- Lavish ----------------------------------------------------------------
+
+const lavishOpen = one(
+	"lavish_open",
+	"Open Lavish board",
+	"Open or resume a Lavish review board for an HTML artifact, so the captain can annotate it and send structured feedback back. Use it whenever a report or decision is easier to review visually than in prose.",
+	Type.Object({ file: Type.String({ description: "Path to the HTML artifact" }) }),
+	"crew-lavish.sh",
+	(p) => ["open", p.file],
+);
+
+const lavishPoll = defineTool({
+	name: "lavish_poll",
+	label: "Wait for board feedback",
+	description:
+		"Wait for the captain's feedback on a Lavish board. This is a tracked wait: it " +
+		"resumes you with whatever arrived, so it never holds the session. Call it once " +
+		"after opening a board and leave it running.",
+	parameters: Type.Object({ file: Type.String({ description: "Path to the HTML artifact" }) }),
+	async execute(_id, params) {
+		if (lavishChild) {
+			return { content: [{ type: "text", text: "already polling — feedback is on its way" }], details: undefined };
+		}
+		return await new Promise((resolve) => {
+			let child: ChildProcess;
+			try {
+				child = spawn("lavish-axi", ["poll", params.file], {
+					cwd: ROOT,
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+			} catch (error) {
+				resolve({ content: [{ type: "text", text: String(error) }], details: undefined });
+				return;
+			}
+			lavishChild = child;
+			let out = "";
+			child.stdout?.on("data", (d: Buffer) => {
+				if (out.length < 65536) out += d.toString();
+			});
+			child.stderr?.on("data", (d: Buffer) => {
+				if (out.length < 65536) out += d.toString();
+			});
+			child.on("exit", () => {
+				lavishChild = null;
+				resolve({
+					content: [{ type: "text", text: out.trim().slice(0, 4000) || "board closed" }],
+					details: undefined,
+				});
+			});
+		});
+	},
+});
+
+// --- crew chrome -----------------------------------------------------------
 
 interface CrewRow {
 	id: string;
@@ -336,12 +462,32 @@ function readBoard(): CrewRow[] {
 	return rows;
 }
 
+interface TodoRow {
+	seq: string;
+	status: string;
+	crew: string;
+	text: string;
+}
+
+function readTodo(): TodoRow[] {
+	let raw: string;
+	try {
+		raw = fs.readFileSync(TODO, "utf8");
+	} catch {
+		return [];
+	}
+	const rows: TodoRow[] = [];
+	for (const line of raw.split("\n")) {
+		const parts = line.split("\t");
+		if (parts.length < 4) continue;
+		rows.push({ seq: parts[0], status: parts[1], crew: parts[2], text: parts[3] });
+	}
+	return rows;
+}
+
 function configFlag(key: string, fallback: boolean): boolean {
 	try {
-		const cfg = JSON.parse(fs.readFileSync(path.join(HOME, "config.json"), "utf8")) as Record<
-			string,
-			unknown
-		>;
+		const cfg = JSON.parse(fs.readFileSync(path.join(HOME, "config.json"), "utf8")) as Record<string, unknown>;
 		return typeof cfg[key] === "boolean" ? (cfg[key] as boolean) : fallback;
 	} catch {
 		return fallback;
@@ -351,8 +497,10 @@ function configFlag(key: string, fallback: boolean): boolean {
 function updateChrome(ctx: ExtensionContext) {
 	if (!ctx.hasUI) return;
 	const rows = readBoard();
+	const todo = readTodo().filter((t) => t.status !== "dropped");
+	const done = todo.filter((t) => t.status === "done").length;
 
-	if (rows.length === 0) {
+	if (rows.length === 0 && todo.length === 0) {
 		ctx.ui.setStatus("foreman", undefined);
 		ctx.ui.setWidget("foreman", undefined);
 		return;
@@ -360,29 +508,33 @@ function updateChrome(ctx: ExtensionContext) {
 
 	const counts = new Map<string, number>();
 	for (const row of rows) counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
-	const order = ["working", "review", "blocked", "queued", "failed", "lost"];
 	const bits: string[] = [];
-	for (const state of order) {
+	if (todo.length) bits.push(`todo ${done}/${todo.length}`);
+	for (const state of ["working", "review", "blocked", "queued", "failed", "lost"]) {
 		const n = counts.get(state);
-		if (n) bits.push(state === "working" ? `${n} working` : `${n} ${state}`);
+		if (n) bits.push(`${n} ${state}`);
 	}
-	ctx.ui.setStatus("foreman", `crew ${rows.length}${bits.length ? ` · ${bits.join(" · ")}` : ""}`);
+	ctx.ui.setStatus("foreman", bits.join(" · "));
 
 	if (!configFlag("crewWidget", true)) {
 		ctx.ui.setWidget("foreman", undefined);
 		return;
 	}
-	const active = rows
+	const lines = rows
 		.filter((r) => ACTIVE_STATES.has(r.state))
 		.sort((a, b) => (a.state === b.state ? a.id.localeCompare(b.id) : a.state.localeCompare(b.state)))
 		.slice(0, 6)
 		.map((r) => `${r.id.padEnd(16)} ${r.state.padEnd(8)} ${r.note}`.trimEnd());
-	ctx.ui.setWidget("foreman", active.length ? active : undefined);
+	for (const item of todo.filter((t) => t.status !== "done").slice(0, Math.max(0, 6 - lines.length))) {
+		lines.push(`${`#${item.seq}`.padEnd(16)} ${item.status.padEnd(8)} ${item.text}`.trimEnd());
+	}
+	ctx.ui.setWidget("foreman", lines.length ? lines : undefined);
 }
 
 // --- auto wake -------------------------------------------------------------
 
 let watcher: ChildProcess | null = null;
+let lavishChild: ChildProcess | null = null;
 let stopping = false;
 let backoffMs = 1000;
 let chromeTimer: ReturnType<typeof setInterval> | null = null;
@@ -391,6 +543,8 @@ function wakeEnabled(): boolean {
 	if (process.env.FOREMAN_WAKE === "0") return false;
 	return configFlag("crewWake", true);
 }
+
+const WAKE_PROMPT = (n: string) => `crew wake: ${n} new (call crew_wake_drain)`;
 
 function startWatcher(pi: ExtensionAPI) {
 	if (stopping || watcher || !wakeEnabled()) return;
@@ -405,11 +559,7 @@ function startWatcher(pi: ExtensionAPI) {
 		return;
 	}
 	watcher = child;
-
-	let out = "";
-	child.stdout?.on("data", (chunk: Buffer) => {
-		if (out.length < 512) out += chunk.toString();
-	});
+	child.stdout?.resume();
 
 	let settled = false;
 	const restart = () => {
@@ -417,40 +567,70 @@ function startWatcher(pi: ExtensionAPI) {
 		settled = true;
 		watcher = null;
 		if (stopping) return;
-		const line = out.trim().slice(0, 400);
-		if (line) {
+		// The queue is authoritative: whatever the watcher printed, the durable
+		// rows are what the foreman acts on.
+		const pending = countPending();
+		if (pending > 0) {
 			backoffMs = 1000;
 			try {
-				// One line, state only. The foreman reads the board itself.
-				pi.sendUserMessage(line, { deliverAs: "followUp" });
+				pi.sendUserMessage(WAKE_PROMPT(String(pending)), { deliverAs: "followUp" });
 			} catch {
 				/* no live session to deliver into */
 			}
 		}
-		const delay = line ? 0 : backoffMs;
+		setTimeout(() => startWatcher(pi), backoffMs);
 		backoffMs = Math.min(backoffMs * 2, 30_000);
-		setTimeout(() => startWatcher(pi), delay);
 	};
 
 	child.on("error", restart);
 	child.on("exit", restart);
 }
 
+function countPending(): number {
+	try {
+		const raw = fs.readFileSync(path.join(HOME, ".wake-queue"), "utf8");
+		const acked = Number.parseInt(
+			fs.readFileSync(path.join(HOME, ".wake-acked"), "utf8").trim() || "0",
+			10,
+		);
+		let n = 0;
+		for (const line of raw.split("\n")) {
+			const seq = Number.parseInt(line.split("\t")[0] ?? "", 10);
+			if (Number.isFinite(seq) && seq > (Number.isFinite(acked) ? acked : 0)) n++;
+		}
+		return n;
+	} catch {
+		return 0;
+	}
+}
+
 export default function foreman(pi: ExtensionAPI) {
-	pi.registerTool(crewSpawn);
-	pi.registerTool(crewList);
-	pi.registerTool(crewProjects);
-	pi.registerTool(crewModels);
-	pi.registerTool(crewConfig);
-	pi.registerTool(crewPeek);
-	pi.registerTool(crewRead);
-	pi.registerTool(crewPrCheck);
-	pi.registerTool(crewSend);
-	pi.registerTool(crewStop);
-	pi.registerTool(crewArchive);
+	for (const tool of [
+		crewTodo,
+		crewSpawn,
+		crewList,
+		crewProjects,
+		crewModels,
+		crewConfig,
+		crewPeek,
+		crewRead,
+		crewBusy,
+		crewPrCheck,
+		crewDecide,
+		crewMerge,
+		crewSend,
+		crewStop,
+		crewArchive,
+		crewRecover,
+		crewWakeDrain,
+		lavishOpen,
+		lavishPoll,
+	]) {
+		pi.registerTool(tool);
+	}
 
 	pi.registerCommand("crew", {
-		description: "Show the crew board; /crew on|off toggles the crew widget",
+		description: "Show the crew board and todo list; /crew on|off toggles the widget",
 		handler: async (args, ctx) => {
 			const arg = (args ?? "").trim().toLowerCase();
 			if (arg === "on" || arg === "off") {
@@ -459,15 +639,35 @@ export default function foreman(pi: ExtensionAPI) {
 				ctx.ui.notify(`crew widget ${arg}`, "info");
 				return;
 			}
-			const board = await run("crew-list.sh", [], 4000);
-			ctx.ui.notify(board, "info");
+			ctx.ui.notify(await run("crew-list.sh", [], 6000), "info");
 		},
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
 		stopping = false;
 		updateChrome(ctx);
+		// Reconcile orphaned crew before anything else reads the board, so a
+		// session that starts after a crash sees the truth immediately.
+		try {
+			await run("crew-recover.sh", ["--queue"], 2000);
+			await run("crew-todo.sh", ["sync"], 200);
+		} catch {
+			/* recovery is best effort; the board still renders */
+		}
+		updateChrome(ctx);
 		startWatcher(pi);
+		const pending = countPending();
+		if (pending > 0) {
+			// A crash, a restart, or a session replacement left rows behind. Say so
+			// once, briefly, without payload.
+			setTimeout(() => {
+				try {
+					pi.sendUserMessage(WAKE_PROMPT(String(pending)), { deliverAs: "followUp" });
+				} catch {
+					/* session went away */
+				}
+			}, 1500);
+		}
 		if (!chromeTimer) {
 			chromeTimer = setInterval(() => updateChrome(ctx), 15_000);
 		}
@@ -489,5 +689,11 @@ export default function foreman(pi: ExtensionAPI) {
 			/* already gone */
 		}
 		watcher = null;
+		try {
+			lavishChild?.kill("SIGTERM");
+		} catch {
+			/* already gone */
+		}
+		lavishChild = null;
 	});
 }

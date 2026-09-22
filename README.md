@@ -88,28 +88,96 @@ widget lists the active crew above the editor. Both are rendered straight from
 the task records — no Herdr call, no model call, no tokens. `/crew` prints the
 board; `/crew on|off` toggles the widget.
 
+## The todo list
+
+`crew_todo` is the durable project queue, and it outlives every session. Ask
+for ten things and ten items exist — five done and five open is a fact on disk,
+not something the foreman has to remember. Items link to the crew member working
+them, and settle themselves: crew `done` closes the item, crew `failed` or
+`lost` reopens it. A new session reads the list and knows exactly where the work
+stands.
+
+```
+#    STATUS       CREW         ITEM
+1    done         auth-flake   fix the flaky auth test
+2    active/review css-audit   audit unused CSS
+3    open         -            rate limit /api/upload
+```
+
+## Decisions
+
+A crew member that hits a choice it should not make for itself asks for it
+instead:
+
+```
+crew-report.sh <id> needs-decision "429 or 503?" --key status-code
+```
+
+It stays open until someone answers, and a later unrelated report cannot bury
+it. `crew_decide <id> <key> <answer>` closes it and delivers the answer to the
+crew's inbox in one act. Open decisions are listed on the board.
+
+## Merges
+
+Crew deliver a pull request and stop in `review`; their pane, worktree and
+branch are held until it lands. The foreman merges with `crew_merge` **only when
+you have said to** — merging is your decision, and the tool exists separately
+from `gh` for that reason. Branches are kept unless you ask for them to go.
+
+## Recovery
+
+A foreman session can die with crew still running, and a Herdr pane can be
+destroyed out from under live work. Session start reconciles both. `crew_recover`
+reports which tasks have no endpoint, and `crew_recover <id>` puts a fresh agent
+back into that task's **existing** worktree with a progress note — commits and
+uncommitted work survive, and the task keeps its identity.
+
+Wakes are durable too: rows are appended before anything is announced and
+acknowledged by sequence, so a crash, a restart, or a session replacement cannot
+lose them. A new session re-presents whatever is still unacknowledged.
+
+## Busy state
+
+Herdr knows whether a pane exists, not whether the agent in it is mid-turn.
+Every crew member is launched with a generated extension that reports its own
+turn lifecycle, so `crew_busy` answers `busy`, `idle`, `dead`, or `unknown` with
+the source that produced it — the difference between supervising and guessing.
+
+## Lavish review boards
+
+`lavish-axi` turns an HTML artifact into a board you can annotate in the browser.
+Both the foreman and every crew member get `lavish_open` and `lavish_poll`, where
+the poll is a tracked background child of that session — the shape `lavish-axi`
+requires, and the reason a long poll never holds a turn. Crew are told to use a
+board by default for visual work.
+
 ## Pieces
 
 | Command | Does |
 |---|---|
 | `bin/foreman` | start the foreman session |
+| `bin/crew-todo.sh` | the durable project list |
 | `bin/crew-spawn.sh <id> --project <p> <task…>` | worktree + pane + fresh pi |
-| `bin/crew-list.sh` | one line per crew; regenerates `BOARD.md` |
-| `bin/crew-projects.sh` | what is in `projects/` |
-| `bin/crew-models.sh [search]` | models pi can run |
+| `bin/crew-list.sh` | todo + crew board; regenerates `BOARD.md` |
+| `bin/crew-report.sh <id> <verb> [note] [--key K] [--pr URL]` | *crew side:* record an event |
+| `bin/crew-decide.sh <id> <key> <answer…>` | answer a crew decision |
+| `bin/crew-busy.sh <id>` / `bin/crew-busy-event.sh` | semantic turn state |
+| `bin/crew-queue.sh` | the durable wake queue |
+| `bin/crew-recover.sh [--relaunch <id>]` | reconcile, or relaunch an orphan |
+| `bin/crew-merge.sh <id>` | merge a crew PR on your say-so |
+| `bin/crew-pr.sh` / `bin/crew-pr-check.sh` | record / poll a pull request |
+| `bin/crew-projects.sh` / `bin/crew-models.sh` | resolve names |
 | `bin/crew-config.sh` | show / set crew settings |
 | `bin/crew-worktree.sh add\|remove` | the git worktree mechanics |
-| `bin/crew-trust.sh <path>` | pi folder-trust for a path |
-| `bin/crew-pr.sh <id> <url>` | *crew side:* record the pull request |
-| `bin/crew-pr-check.sh <id>` | has that pull request landed? |
+| `bin/crew-trust.sh <path>` | pi folder trust for a path |
+| `bin/crew-lavish.sh open\|end\|export` | review boards |
 | `bin/crew-peek.sh <id> [n]` | bounded tail of the pane |
 | `bin/crew-send.sh <id> <text…>` | durable inbox record + doorbell |
 | `bin/crew-inbox.sh <id>` | *crew side:* read and acknowledge steers |
-| `bin/crew-report.sh <id> <state> [note]` | *crew side:* update status |
 | `bin/crew-read.sh <id>` | the crew's report, capped |
 | `bin/crew-stop.sh <id> [--exit\|--close]` | interrupt / exit / close |
 | `bin/crew-archive.sh <id> [--worktree]` | retire a finished task |
-| `bin/crew-watch.sh` | one-shot state watcher behind the auto wake |
+| `bin/crew-watch.sh` | one-shot watcher behind the auto wake |
 
 State lives in `.foreman/` (gitignored); `FOREMAN_HOME` relocates it and
 `FOREMAN_SESSION` picks a named Herdr session (default `default`).

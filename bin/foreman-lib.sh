@@ -195,3 +195,171 @@ foreman_pane_of() { # <id>
   foreman_herdr pane get "${target#*:}" >/dev/null 2>&1 || return 1
   printf '%s' "${target#*:}"
 }
+
+# --- events: the single source of truth for what a crew member reported ------
+#
+# Append-only, tab separated: <iso> <verb> <key> <note>. The point of a log
+# rather than a mutable field is that a keyed decision stays open until it is
+# explicitly resolved, so a later unrelated append cannot bury it.
+
+foreman_event_append() { # <id> <verb> [key] [note]
+  local dir
+  dir=$(foreman_require_task "$1") || return 1
+  printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" "${3:-}" "${4:-}" >>"$dir/events"
+}
+
+# Fold the log into "<state>\t<note>". One owner, so every reader agrees.
+foreman_fold_events() { # <events-file>
+  [ -f "$1" ] || {
+    printf 'queued\t\n'
+    return 0
+  }
+  awk -F'\t' '
+    {
+      verb = $2; key = $3; note = $4
+      if (verb == "needs-decision") {
+        if (key != "") { if (!(key in open)) order[++n] = key; open[key] = note }
+        next
+      }
+      if (verb == "resolved") { if (key != "") delete open[key]; next }
+      if (verb == "progress") { next }
+      state = verb; stnote = note
+    }
+    END {
+      if (state == "") state = "queued"
+      if (state != "done" && state != "failed" && state != "review") {
+        for (i = 1; i <= n; i++) {
+          k = order[i]
+          if (k in open) {
+            state = "blocked"
+            stnote = "[" k "] " open[k]
+            break
+          }
+        }
+      }
+      printf "%s\t%s\n", state, stnote
+    }
+  ' "$1"
+}
+
+# Refresh the derived status cache from the log, preserving the report time.
+foreman_status_sync() { # <id>
+  local dir folded state note tmp
+  dir=$(foreman_require_task "$1") || return 1
+  folded=$(foreman_fold_events "$dir/events")
+  state=${folded%%$'\t'*}
+  note=${folded#*$'\t'}
+  tmp="$dir/status.tmp.$$"
+  {
+    printf 'state=%s\n' "$state"
+    printf 'at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'note=%s\n' "$note"
+  } >"$tmp" && mv "$tmp" "$dir/status"
+}
+
+# Open decisions across the fleet: "<id>\t<key>\t<note>".
+foreman_open_decisions() {
+  local dir
+  for id in $(foreman_task_ids); do
+    dir=$(foreman_task_dir "$id")
+    [ -f "$dir/events" ] || continue
+    awk -F'\t' -v id="$id" '
+      $2 == "needs-decision" && $3 != "" { if (!($3 in open)) order[++n] = $3; open[$3] = $4; next }
+      $2 == "resolved" && $3 != "" { delete open[$3]; next }
+      END {
+        for (i = 1; i <= n; i++) {
+          k = order[i]
+          if (k in open) printf "%s\t%s\t%s\n", id, k, open[k]
+        }
+      }
+    ' "$dir/events"
+  done
+}
+
+# --- wake queue: durable, sequenced, acknowledged by sequence ---------------
+
+foreman_queue_path() { printf '%s/.wake-queue' "$FOREMAN_HOME"; }
+foreman_queue_ack_path() { printf '%s/.wake-acked' "$FOREMAN_HOME"; }
+
+foreman_queue_append() { # <kind> <payload> -> prints the sequence
+  local kind=$1 payload=$2 path lock n last=0
+  path=$(foreman_queue_path)
+  mkdir -p "$FOREMAN_HOME"
+  lock="$FOREMAN_HOME/.wake-queue.lock"
+  local tries=0
+  while ! mkdir "$lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 50 ] || return 1
+    sleep 0.1
+  done
+  if [ -f "$path" ]; then
+    last=$(tail -n 1 "$path" | cut -f1)
+    case "$last" in '' | *[!0-9]*) last=0 ;; esac
+  fi
+  n=$((last + 1))
+  printf '%s\t%s\t%s\t%s\n' "$n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$kind" "$payload" >>"$path"
+  rmdir "$lock" 2>/dev/null || true
+  printf '%s' "$n"
+}
+
+foreman_queue_acked() { # -> highest acknowledged sequence (0 when none)
+  local a
+  a=$(cat "$(foreman_queue_ack_path)" 2>/dev/null || printf '0')
+  case "$a" in '' | *[!0-9]*) a=0 ;; esac
+  printf '%s' "$a"
+}
+
+foreman_queue_pending() { # -> rows after the ack cursor
+  local path a
+  path=$(foreman_queue_path)
+  [ -f "$path" ] || return 0
+  a=$(foreman_queue_acked)
+  awk -F'\t' -v a="$a" '$1 + 0 > a' "$path"
+}
+
+foreman_queue_count() {
+  local n
+  n=$(foreman_queue_pending | wc -l | tr -d ' ')
+  printf '%s' "$n"
+}
+
+foreman_queue_ack() { # <sequence>
+  case "$1" in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$1" >"$(foreman_queue_ack_path)"
+}
+
+# --- semantic busy state ----------------------------------------------------
+# Written only by the generated per-crew extension through crew-busy-event.sh.
+# A record whose gen does not match the armed sidecar is a stale incarnation and
+# reads unknown, never idle.
+
+foreman_busy_record() { printf '%s/busy-state' "$(foreman_task_dir "$1")"; }
+foreman_busy_gen() { printf '%s/busy-gen' "$(foreman_task_dir "$1")"; }
+
+foreman_busy_read() { # <id> -> "state<TAB>source"
+  local dir rec gen
+  dir=$(foreman_require_task "$1") || return 1
+  rec="$dir/busy-state"
+  gen=$(cat "$dir/busy-gen" 2>/dev/null || printf '')
+  if [ ! -f "$rec" ] || [ -z "$gen" ]; then
+    printf 'unknown\tmissing\n'
+    return 0
+  fi
+  # The record is a single line of key=value tokens; parse it directly.
+  local line
+  line=$(head -n 1 "$rec")
+  local gotstate="unknown" gotsource="malformed" gotgen=""
+  for tok in $line; do
+    case "$tok" in
+    state=*) gotstate=${tok#state=} ;;
+    source=*) gotsource=${tok#source=} ;;
+    gen=*) gotgen=${tok#gen=} ;;
+    esac
+  done
+  case "$gotstate" in busy | idle | unknown) ;; *) gotstate=unknown ;; esac
+  if [ "$gotgen" != "$gen" ]; then
+    printf 'unknown\tstale-gen\n'
+    return 0
+  fi
+  printf '%s\t%s\n' "$gotstate" "$gotsource"
+}

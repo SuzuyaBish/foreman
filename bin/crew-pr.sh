@@ -33,6 +33,6 @@ foreman_meta_set "$ID" pr "$URL"
 [ -z "$NUMBER" ] || foreman_meta_set "$ID" pr_number "$NUMBER"
 
 [ -n "$NOTE" ] || NOTE="PR open: $URL"
-foreman_status_set "$ID" review "$NOTE"
-printf '%s  review  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NOTE" >>"$DIR/events"
+foreman_event_append "$ID" review "" "$NOTE"
+foreman_status_sync "$ID"
 printf 'recorded PR %s for %s (awaiting merge)\n' "$URL" "$ID"
