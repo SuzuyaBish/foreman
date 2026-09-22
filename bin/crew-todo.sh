@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # crew-todo.sh - the durable project todo list.
 #
-# Usage: crew-todo.sh add <text...>
-#        crew-todo.sh list [--all|--open]
+# Usage: crew-todo.sh add [--note <text>] <text...>
+#        crew-todo.sh note <seq> <text...>
+#        crew-todo.sh list [--all|--open] [--no-notes]
 #        crew-todo.sh start <seq> <crew-id>
 #        crew-todo.sh done <seq>
 #        crew-todo.sh open <seq>
@@ -14,9 +15,11 @@
 # is queued, what is in flight, and what finished — rather than reconstructing
 # that from memory, which is exactly what a restart destroys.
 #
-# Rows are tab separated: <seq> <status> <crew-id-or-dash> <text>
+# Rows are tab separated: <seq> <status> <crew-id-or-dash> <text> <note>
 # Status is the INTENT (open, active, done, dropped). The crew's own state is
 # read live and shown beside it, so a row never silently disagrees with reality.
+# `note` is optional context for one item (`-` when absent); it is kept out of
+# the item text so the board stays one line per item.
 set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"
@@ -27,6 +30,10 @@ todo_init() {
   mkdir -p "$FOREMAN_HOME"
   [ -f "$TODO" ] || : >"$TODO"
 }
+
+# Tab is the field separator and newlines end a row, so nothing user-supplied
+# may contain either.
+todo_sanitize() { printf '%s' "$1" | tr '\t\n' '  '; }
 
 todo_lock() {
   local lock="$FOREMAN_HOME/.todo.lock" tries=0
@@ -47,8 +54,11 @@ todo_next_seq() {
   printf '%s' "$((max + 1))"
 }
 
-todo_valid_seq() {
-  case "${1:-}" in '' | *[!0-9]*) return 1 ;; esac
+todo_note_of() { # <seq>
+  awk -F'\t' -v s="$1" '$1 == s { print ($5 == "" ? "-" : $5) }' "$TODO"
+}
+
+todo_valid_seq() {  case "${1:-}" in '' | *[!0-9]*) return 1 ;; esac
   awk -F'\t' -v s="$1" '$1 == s { found = 1 } END { exit found ? 0 : 1 }' "$TODO"
 }
 
@@ -82,14 +92,46 @@ ACTION=${1:-list}
 case "$ACTION" in
 add)
   if [ $# -ge 1 ]; then shift; fi
-  TEXT="${*-}"
-  [ -n "$TEXT" ] || foreman_die "usage: crew-todo.sh add <text...>"
+  NOTE=-
+  PARTS=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    --note)
+      [ $# -ge 2 ] || foreman_die "--note requires a value"
+      NOTE=$(todo_sanitize "$2")
+      shift 2
+      ;;
+    *)
+      PARTS+=("$1")
+      shift
+      ;;
+    esac
+  done
+  TEXT=$(todo_sanitize "${PARTS[*]-}")
+  [ -n "$TEXT" ] || foreman_die "usage: crew-todo.sh add [--note <text>] <text...>"
   todo_init
   lock=$(todo_lock)
   seq=$(todo_next_seq)
-  printf '%s\t%s\t%s\t%s\n' "$seq" open - "$TEXT" >>"$TODO"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$seq" open - "$TEXT" "$NOTE" >>"$TODO"
   rmdir "$lock" 2>/dev/null || true
   printf 'added #%s\n' "$seq"
+  ;;
+note)
+  SEQ=${2:-}
+  if [ $# -ge 2 ]; then shift 2; else set --; fi
+  todo_init
+  todo_valid_seq "$SEQ" || foreman_die "no todo item #${SEQ:-<none>}"
+  NOTE=$(todo_sanitize "${*-}")
+  [ -n "$NOTE" ] || foreman_die "usage: crew-todo.sh note <seq> <text...>"
+  lock=$(todo_lock)
+  tmp="$TODO.tmp.$$"
+  awk -F'\t' -v s="$SEQ" -v n="$NOTE" '
+    BEGIN { OFS = "\t" }
+    { if (NF < 5) $5 = "-"; if ($1 == s) $5 = n; print }
+  ' "$TODO" >"$tmp"
+  mv "$tmp" "$TODO"
+  rmdir "$lock" 2>/dev/null || true
+  printf 'noted #%s\n' "$SEQ"
   ;;
 start)
   SEQ=${2:-}
@@ -113,8 +155,7 @@ done | open | drop)
   tmp="$TODO.tmp.$$"
   awk -F'\t' -v s="$SEQ" -v st="$STATUS" -v c="-" '
     BEGIN { OFS = "\t" }
-    $1 == s { $2 = st; if (st == "done" || st == "dropped") $3 = "-"; else $3 = c }
-    { print }
+    { if (NF < 5) $5 = "-"; if ($1 == s) { $2 = st; $3 = (st == "done" || st == "dropped") ? "-" : c }; print }
   ' "$TODO" >"$tmp"
   mv "$tmp" "$TODO"
   rmdir "$lock" 2>/dev/null || true
@@ -124,8 +165,9 @@ sync)
   todo_init
   lock=$(todo_lock)
   tmp="$TODO.tmp.$$"
-  while IFS=$'\t' read -r seq status crew text; do
+  while IFS=$'\t' read -r seq status crew text note; do
     [ -n "$seq" ] || continue
+    [ -n "$note" ] || note=-
     # Any row still linked to a crew follows that crew, whatever the captain did
     # in between: a reopen after a failed crew must still settle when a relaunch
     # succeeds, and a manual `open` of running work is not a way to detach it.
@@ -138,7 +180,7 @@ sync)
       failed | lost | stopped | gone) status=open ;;
       esac
     fi
-    printf '%s\t%s\t%s\t%s\n' "$seq" "$status" "$crew" "$text"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$seq" "$status" "$crew" "$text" "$note"
   done <"$TODO" >"$tmp"
   mv "$tmp" "$TODO"
   rmdir "$lock" 2>/dev/null || true
@@ -157,8 +199,17 @@ summary)
 list)
   todo_init
   FILTER=all
-  [ "${2:-}" = --open ] && FILTER=open
-  awk -F'\t' -v filter="$FILTER" -v tasks="$FOREMAN_TASKS" '
+  NOTES=1
+  shift || true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    --open) FILTER=open ;;
+    --no-notes) NOTES=0 ;;
+    *) foreman_die "unknown list option: $1" ;;
+    esac
+    shift
+  done
+  awk -F'\t' -v filter="$FILTER" -v notes="$NOTES" -v tasks="$FOREMAN_TASKS" '
     function crewstate(id,   f, line, st) {
       if (id == "" || id == "-") return "-"
       f = tasks "/" id "/status"
@@ -175,10 +226,11 @@ list)
       label = $2
       if ($2 == "active" && cs != "-") label = "active/" cs
       printf "%-4s %-9s %-11s %s\n", $1, label, $3, $4
+      if (notes == 1 && $5 != "" && $5 != "-") printf "%-26s ↳ %s\n", "", $5
     }
   ' "$TODO"
   ;;
 *)
-  foreman_die "usage: crew-todo.sh add|list|start|done|open|drop|sync|summary"
+  foreman_die "usage: crew-todo.sh add|note|list|start|done|open|drop|sync|summary"
   ;;
 esac
