@@ -134,8 +134,10 @@ injected with `triggerTurn: false` and costs nothing — a wake that did not spe
 a turn would be a wake nobody reads, which is the failure this distinction
 exists to prevent, and `tests/crew-wake.test.sh` pins both halves of it.
 
-Acked means: every row at or before the sequence in `.wake-acked` is done. That
-file is written by the first drain and does not exist before it, so "no ack file"
+Acked means: every row at or before the sequence in `.wake-acked` is done. The
+drain only *prints* the rows and the sequence to acknowledge; the ack is the
+separate, explicit step that writes the cursor. That file does not exist before
+the first ack, so "no ack file"
 must read as "nothing acked yet" — **not** as "nothing to do". Getting that
 backwards deadlocks the feature on a fresh home: nothing is announced, so nothing
 is drained, so the ack file is never created. The extension keeps its own count

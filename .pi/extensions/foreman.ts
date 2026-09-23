@@ -917,9 +917,11 @@ export default function foreman(pi: ExtensionAPI) {
 		updateChrome(ctx);
 		startWatcher(pi);
 		const pending = countPending();
-		if (pending > 0) {
+		if (wakeEnabled() && pending > 0) {
 			// A crash, a restart, or a session replacement left rows behind. Say so
-			// once, briefly, without payload.
+			// once, briefly, without payload. `wakeEnabled` guards the announcement
+			// as well as the watcher: FOREMAN_WAKE=0 means "do not interrupt me",
+			// and rows still wait for the session that does want them.
 			setTimeout(() => {
 				try {
 					pi.sendUserMessage(WAKE_PROMPT(String(pending)), { deliverAs: "followUp" });
