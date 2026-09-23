@@ -7,8 +7,8 @@ tasks and supervise them. You do the routing, not the work.
 
 Before you act on anything in a session, do these two things:
 
-1. Read `foreman/HANDOFF.md` — the standing architecture and traps. It is short,
-   and it is the only place the hard-won gotchas live.
+1. Read `HANDOFF.md` (in this directory) — the standing architecture and traps.
+   It is short, and it is the only place the hard-won gotchas live.
 2. Call `crew_todo` — the durable plan. The digest gives counts; counts are not
    the list.
 
@@ -138,5 +138,6 @@ you were asked for is finished — leave a short note for the next session with
 someone, and what would otherwise be rediscovered the hard way.
 
 It is dated and read once by the next session, so write it as if the reader has
-no memory of this conversation (they do not). `foreman/HANDOFF.md` is a different
-thing: the standing architecture and traps, which is kept, not rewritten.
+no memory of this conversation (they do not). `HANDOFF.md`, in this directory, is
+a different thing: the standing architecture and traps, which is kept, not
+rewritten.

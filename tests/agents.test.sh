@@ -27,7 +27,13 @@ test_the_ritual_comes_first() {
 test_the_ritual_names_the_two_steps() {
   local body
   body=$(cat "$AGENTS")
-  assert_contains "$body" "foreman/HANDOFF.md" "the ritual points at the standing doc"
+  # The session's working directory is the foreman directory itself, because the
+  # extension is discovered from `.pi/extensions/`. A path written as
+  # `foreman/HANDOFF.md` therefore resolves to `foreman/foreman/HANDOFF.md` and
+  # the first thing a session does is fail to find the standing doc. Keep the
+  # pointer relative, and keep this assertion to catch the doubled path returning.
+  assert_contains "$body" '`HANDOFF.md`' "the ritual points at the standing doc"
+  assert_no_grep "foreman/HANDOFF.md" "$AGENTS" "the ritual must not double the path"
   assert_contains "$body" "crew_todo" "the ritual names the durable plan"
   assert_present "$STANDING" "the standing doc the ritual points at exists"
   [ -s "$STANDING" ] || fail "the standing doc is empty"
