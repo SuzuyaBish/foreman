@@ -114,6 +114,55 @@ test_a_relaunch_adopts_the_existing_workspace() {
   pass "a relaunch adopts the task's existing workspace"
 }
 
+test_the_label_leads_with_the_item_number() {
+  local dir seq
+  dir=$(fm_tmproot ws-number)
+  fresh_herdr
+  HERDR_WORKSPACE_ID=ws-parent7 HERDR_SESSION=default
+  export HERDR_WORKSPACE_ID HERDR_SESSION
+  fm_herdr_seed_workspace ws-parent7 skills
+  "$BIN/crew-todo.sh" add --project proj "label the crew" >/dev/null
+  seq=$(cut -f1 "$FOREMAN_HOME/todo.tsv" | tail -1)
+
+  "$SPAWN" numbered-crew "$dir" --todo "$seq" task >/dev/null
+  assert_contains "$(fm_herdr_calls)" "--label └ #$seq numbered-crew" \
+    "the workspace label leads with the item number"
+  pass "a linked crew's workspace label starts with its todo number"
+}
+
+test_the_board_supplies_the_number_without_a_flag() {
+  # No spawn flag: the number is read from the board, which is how a recovery
+  # relaunch - it passes no flag either - still gets the number.
+  local dir seq
+  dir=$(fm_tmproot ws-board)
+  fresh_herdr
+  HERDR_WORKSPACE_ID=ws-parent9 HERDR_SESSION=default
+  export HERDR_WORKSPACE_ID HERDR_SESSION
+  fm_herdr_seed_workspace ws-parent9 skills
+  "$BIN/crew-todo.sh" add --project proj "board supplies the number" >/dev/null
+  seq=$(cut -f1 "$FOREMAN_HOME/todo.tsv" | tail -1)
+  "$BIN/crew-todo.sh" start "$seq" board-crew >/dev/null
+
+  "$SPAWN" board-crew "$dir" task >/dev/null
+  assert_contains "$(fm_herdr_calls)" "--label └ #$seq board-crew" \
+    "a launch with no flag reads the number from the board"
+  pass "the board supplies the number when no spawn flag is passed"
+}
+
+test_an_unlinked_crew_keeps_the_plain_label() {
+  local dir
+  dir=$(fm_tmproot ws-plain)
+  fresh_herdr
+  HERDR_WORKSPACE_ID=ws-parent10 HERDR_SESSION=default
+  export HERDR_WORKSPACE_ID HERDR_SESSION
+  fm_herdr_seed_workspace ws-parent10 skills
+
+  "$SPAWN" plain-crew "$dir" task >/dev/null
+  assert_contains "$(fm_herdr_calls)" "--label └ plain-crew" \
+    "no linked item keeps today's id-only label"
+  pass "an unlinked crew's workspace label is unchanged"
+}
+
 test_close_retires_the_workspace_not_the_parent() {
   local dir ws
   dir=$(fm_tmproot ws-close)
@@ -182,6 +231,9 @@ test_a_herdr_without_workspace_create_falls_back() {
 test_a_crew_gets_its_own_workspace_after_its_parent
 test_a_refused_move_is_only_presentation
 test_a_relaunch_adopts_the_existing_workspace
+test_the_label_leads_with_the_item_number
+test_the_board_supplies_the_number_without_a_flag
+test_an_unlinked_crew_keeps_the_plain_label
 test_close_retires_the_workspace_not_the_parent
 test_an_older_record_never_closes_the_foremans_workspace
 test_a_herdr_without_workspace_create_falls_back

@@ -298,7 +298,20 @@ Herdr does model:
 - **A workspace per crew member.** The launch runs
   `herdr workspace create --cwd <worktree> --label "└ <id>" --no-focus` and
   renames the seeded tab to `crew-<id>`. The child glyph in the label is the
-  whole visual claim.
+  whole visual claim. When the task is linked to a todo item the label leads
+  with its number — `└ #44 calm-baseline` — so the sidebar answers "which item is
+  this" at a glance; the `└ ` marker and the id both stay. The number comes from
+  the spawn's `--todo`, else the board read by crew id, which is how a recovery
+  relaunch gets it. An unlinked crew keeps the plain `└ <id>`. The label is
+  written when the workspace is created and never rewritten, so an item linked
+  after the launch shows on a later launch into a fresh workspace, not on the one
+  already on screen.
+
+  The worktree **directory** deliberately keeps its plain `worktrees/<id>` name.
+  Herdr renders the workspace label, not the cwd: `workspace create --label`
+  sets a custom label and the sidebar prints it, so renaming the directory would
+  change nothing the captain sees while moving the teardown anchor (see
+  "Teardown") for no gain.
 - **Position.** The workspace is then moved directly after the foreman's own,
   past any sibling already in that block, so a crew's workspaces read as a
   contiguous child block. `workspace.move` exists only on Herdr's control
@@ -632,7 +645,8 @@ zero-token mechanics. Its shape follows from the design:
 - Herdr has **no** parent/child relationship for panes or agents. `herdr agent
   list` returns `parent_pane_id`, `parent_agent_id` and `depth`, but nothing can set
   them: no CLI flag, no socket method, and firstmate does not either. A crew reads
-  as a subordinate by being its own workspace, labelled `└ <id>` and moved after
+  as a subordinate by being its own workspace, labelled `└ <id>` (or
+  `└ #<n> <id>` when linked to a todo item) and moved after
   the foreman's — see DESIGN, "How a crew member appears".
 - `workspace.move` exists only on Herdr's control socket; `herdr workspace` has no
   move subcommand. `bin/herdr-workspace-move.mjs` is the transport, and

@@ -216,13 +216,16 @@ reads, so ask it to write one if you change the plan.
 
 Each crew member gets its own Herdr **workspace**, labelled `└ <id>` and placed
 directly after the foreman's own workspace, with its seeded tab renamed
-`crew-<id>`. Herdr has no parent/child relationship between agents, so that
-glyph and that position *are* the hierarchy: the sidebar reads
+`crew-<id>`. When the crew is linked to a todo item the label leads with its
+number — `└ #44 parser-fix` — so a truncated sidebar row still says which item
+the crew is on; an unlinked crew keeps the plain `└ <id>`. Herdr has no
+parent/child relationship between agents, so that glyph and that position *are*
+the hierarchy: the sidebar reads
 
 ```
 1 foreman
-2 └ parser-fix
-3 └ sheet-render
+2 └ #44 parser-fix
+3 └ #45 sheet-render
 4 design-system
 ```
 
