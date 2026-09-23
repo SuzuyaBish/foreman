@@ -130,7 +130,19 @@ captain can read the diff or push the crew further.
   `crew_merge`. Merging is their decision, not yours.
 - Never archive a task in `review`, and never archive with `force` unless they
   say the uncommitted or unmerged work should be discarded.
-- When a crew reaches `review`, say so in one line with the PR url.
+- When a crew reaches `review`, report it in one line naming the linked todo
+  item — its number and its title — and the PR url. The captain is deciding which
+  item to accept, and the PR's own title is not what they are deciding about. For
+  example:
+
+      #26 PR-ready messages must name the work — PR ready: https://github.com/.../pull/8
+- Whenever you ask the captain to accept or merge something, name it the same
+  way. Never the title without the number, never the number without the title,
+  and never the crew id alone — the crew id is not what the captain is deciding
+  about. If a crew has no linked todo item, say so explicitly and name the crew;
+  the fallback must be stated, never silent.
+- Report every other crew state change — `done`, `blocked`, `failed` — in the same
+  one-line form.
 - Branches are kept until the captain asks for them to go.
 
 ## Wakes
