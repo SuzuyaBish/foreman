@@ -229,12 +229,34 @@ const resultLines = (tool) => {
 	);
 	return component ? component.render(80).length : -1;
 };
+// What a whole built-in row leaves on screen. pi's ToolExecutionComponent adds a
+// `Spacer(1)` in front of every tool definition, and only its `renderShell:
+// "self"` path can return zero lines when the frame draws nothing. This drives
+// both render slots through one row state, the way a real call and its result do.
+const BUILTIN_NAMES = ["read", "bash", "edit", "write", "find", "grep", "ls"];
+const hiddenRowLines = (tool) => {
+	const state = {};
+	const call = tool.renderCall ? tool.renderCall({ path: "x" }, theme, { ...rctx, state }) : undefined;
+	const result = tool.renderResult
+		? tool.renderResult(
+				{ content: [{ type: "text", text: "out" }], details: undefined },
+				{ expanded: false, isPartial: false },
+				theme,
+				{ ...rctx, state },
+			)
+		: undefined;
+	const frame = [...(call ? call.render(78) : []), ...(result ? result.render(78) : [])];
+	if (tool.renderShell === "self") return frame.length === 0 ? 0 : frame.length + 1;
+	return frame.length === 0 ? 1 : frame.length + 1;
+};
+const builtinRows = () => BUILTIN_NAMES.map((name) => hiddenRowLines(tools[name])).join(",");
 
 const statusBefore = last(status);
 const widgetBefore = last(widget);
 process.stdout.write(`CALM_CUSTOM_OFF|${callLines(tools.crew_list, { action: "list" })}\n`);
 process.stdout.write(`CALM_RESULT_OFF|${resultLines(tools.crew_list)}\n`);
 process.stdout.write(`CALM_BUILTIN_OFF|${callLines(tools.read, { path: "x" })}\n`);
+process.stdout.write(`CALM_BUILTIN_ROW_OFF|${builtinRows()}\n`);
 // The real ToolExecutionComponent hands the component renderCall returned back in
 // as `lastComponent` on the next render. The built-in renderers call setText on
 // it, so the calm wrapper must not forward its own component as their Text.
@@ -256,6 +278,7 @@ process.stdout.write(`CONFIG|${fs.readFileSync(path.join(home, "config.json"), "
 process.stdout.write(`CALM_CUSTOM_ON|${callLines(tools.crew_list, { action: "list" })}\n`);
 process.stdout.write(`CALM_RESULT_ON|${resultLines(tools.crew_list)}\n`);
 process.stdout.write(`CALM_BUILTIN_ON|${callLines(tools.read, { path: "x" })}\n`);
+process.stdout.write(`CALM_BUILTIN_ROW_ON|${builtinRows()}\n`);
 const same = last(status) === statusBefore && JSON.stringify(last(widget)) === JSON.stringify(widgetBefore);
 process.stdout.write(`CALM_CHROME|${same ? "same" : "changed"}\n`);
 
@@ -477,6 +500,21 @@ test_calm_mode_also_hides_assistant_thinking() {
   # what re-lays out the row, which is the live behaviour the captain asked for.
   assert_equals "thinking,text" "$(field ASSISTANT_AGAIN)" "the toggle brings thinking back on the same row"
   pass "calm mode collapses assistant thinking, live and reversible"
+}
+
+# The captain's own symptom: a hidden tool row still took a blank line, and the
+# blanks stacked down a turn - an increasing gap under his prompt. The row's
+# content hid but the row did not, because pi's ToolExecutionComponent keeps an
+# unconditional `Spacer(1)` ahead of a default-shell definition; only a
+# `renderShell: "self"` row can render zero lines. Every built-in except `edit`
+# ships on the default shell, so calm has to give them a self shell of its own.
+# Each value is the lines one whole hidden row occupies; 0 is gone, 1 is the hole.
+test_a_hidden_builtin_tool_row_leaves_no_blank_line() {
+  assert_equals "0,0,0,0,0,0,0" "$(field CALM_BUILTIN_ROW_ON)" \
+    "every hidden built-in row occupies zero lines, pi's leading spacer included"
+  assert_not_contains "$OUT" "CALM_BUILTIN_ROW_OFF|0,0,0,0,0,0,0" \
+    "the same rows still draw while calm is off"
+  pass "a hidden built-in tool row leaves no blank line behind"
 }
 
 # The sibling import is the one thing that can take the whole extension down, so
@@ -761,6 +799,7 @@ test_the_widget_ranks_and_tiers_the_crew
 test_the_widget_can_be_turned_off
 test_calm_mode_hides_the_foremans_tool_calls
 test_calm_mode_also_hides_assistant_thinking
+test_a_hidden_builtin_tool_row_leaves_no_blank_line
 test_the_vendored_calm_module_loads_under_pis_jiti
 test_the_crew_command_completes_its_arguments
 test_the_chrome_is_scoped_to_the_project_in_focus
