@@ -28,6 +28,12 @@ replaces those two steps.
   memory, so the list has to be the truth.
 - Do the work yourself only when it is small, single-step, or needs your judgment.
 
+Quitting is not free: a `review` or `done` report is refused while the crew
+still has a dev server, watcher or test runner up, and stopping a crew sweeps
+the rest. A crew that leaves a process behind holds its port for the rest of the
+session, and by the time the task is archived nothing knows it was ever the
+crew's.
+
 ## The todo list is the work
 
 `crew_todo` is the durable queue and it outlives every session. Treat it as the

@@ -55,6 +55,28 @@ fi
 [ "$VERB" = needs-decision ] || [ -z "$KEY" ] || foreman_die "--key is only valid with needs-decision"
 [ "$VERB" = needs-decision ] && [ -z "$KEY" ] && foreman_die "needs-decision requires --key"
 
+# A crew that is finished stops what it started, and this is the last moment the
+# machine knows those processes were its: once the task is archived, a stray dev
+# server is just an anonymous port. Only the finishing verbs are gated - a crew
+# must always be able to report an obstacle or ask for a decision - and the gate
+# runs before anything is recorded, so a refusal leaves no trace at all.
+case "$VERB" in
+review | done)
+  if strays=$("$FOREMAN_ROOT/bin/crew-processes.sh" list "$ID" 2>&1); then
+    if [ -n "$strays" ]; then
+      foreman_die "cannot report $VERB yet: this crew still has work running.
+
+$strays
+
+Stop it first - crew_cleanup(action=\"kill\"), or:
+  $FOREMAN_ROOT/bin/crew-processes.sh kill $ID
+Then report again. A process you leave behind outlives the task, and after it is
+archived nothing knows it was yours."
+    fi
+  fi
+  ;;
+esac
+
 if [ -n "$PR" ]; then
   [ "$VERB" = review ] || foreman_die "--pr is only valid with the review verb"
   NUMBER=

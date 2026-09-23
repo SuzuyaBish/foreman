@@ -93,6 +93,9 @@ test_isolation_uses_a_worktree() {
   assert_present "$wt/.git" "the worktree exists"
   assert_contains "$(cat "$TASKDIR/iso/meta")" "project=$proj" "the owning project is recorded"
   assert_contains "$(cat "$TASKDIR/iso/meta")" "worktree=$wt" "the worktree is recorded"
+  # The launch records what was already running in the crew's directory, so a
+  # --no-isolate crew cannot be blamed for the captain's own processes there.
+  assert_present "$TASKDIR/iso/processes-at-launch" "the launch snapshots the directory it starts in"
   assert_contains "$(cat "$TASKDIR/iso/meta")" "branch=crew/iso" "the branch is recorded"
   git -C "$proj" show-ref --verify --quiet refs/heads/crew/iso ||
     fail "the crew branch exists in the project"

@@ -232,6 +232,21 @@ If you simply cannot proceed, use \`blocked\` instead:
 
   crew_report(verb="blocked", note="<one-line reason>")
 
+## Stop what you started
+
+Dev servers, file watchers, test runners, emulators, browsers, anything you put
+in the background: stop them before you finish. They outlive this task, they
+hold ports and CPU, and once the task is archived nothing on the machine knows
+they were ever yours. The \`crew_cleanup\` tool lists what is still running in
+your working directory and stops it:
+
+  crew_cleanup(action="check")     what is still up
+  crew_cleanup(action="kill")      stop it
+
+A \`review\` or \`done\` report is refused while anything is still running, so do
+this before you report. A Lavish board is the one exception: it stays up while
+the captain annotates it, and stops itself when that review is over.
+
 ## New instructions
 
 The foreman can send more instructions at any time. They land in:

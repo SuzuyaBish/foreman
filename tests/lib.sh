@@ -77,8 +77,18 @@ assert_absent() { [ ! -e "$1" ] || fail "$2"; }
 # fm_tmproot is almost always called as `X=$(fm_tmproot prefix)`, so it must
 # register through a file rather than shell state that dies with the subshell.
 FM_TEST_REGISTRY=$(mktemp "${TMPDIR:-/tmp}/.foreman-test.$$.XXXXXX") || exit 1
+# Processes a test started to stand in for a crew's strays. They are orphaned on
+# purpose, so nothing else would ever reap them: a run that fails halfway must
+# still leave the machine clean.
+FM_TEST_PIDFILE=$(mktemp "${TMPDIR:-/tmp}/.foreman-pids.$$.XXXXXX") || exit 1
 
 fm_test_cleanup() {
+  if [ -f "$FM_TEST_PIDFILE" ]; then
+    while IFS= read -r p; do
+      [ -n "$p" ] && kill -9 "$p" 2>/dev/null
+    done <"$FM_TEST_PIDFILE"
+    rm -f "$FM_TEST_PIDFILE"
+  fi
   if [ -f "$FM_TEST_REGISTRY" ]; then
     while IFS= read -r d; do
       [ -n "$d" ] && rm -rf "$d"
@@ -554,7 +564,38 @@ fm_task() {
 # crew-spawn records it. Scope is derived from this, in the shell and in the
 # chrome, so both read whatever this writes.
 fm_task_project() {
-  printf 'project=%s\n' "$2" >>"$FOREMAN_HOME/tasks/$1/meta"
+  fm_task_field "$1" project "$2"
+}
+
+# fm_task_field <id> <key> <value>: append a meta field to a task record.
+fm_task_field() {
+  printf '%s=%s\n' "$2" "$3" >>"$FOREMAN_HOME/tasks/$1/meta"
+}
+
+# fm_stray <dir> <command...>: start <command> with its cwd in <dir>, then let
+# the shell that started it exit, so the process is orphaned to PID 1 exactly the
+# way a real stray is (the agent's tool shell exits the moment its call returns).
+# Registers the pid for cleanup. Prints the pid.
+fm_stray() {
+  local dir=$1 pidfile pid
+  shift
+  [ -d "$dir" ] || return 1
+  # The pid file lives outside <dir> on purpose: a stray must not change what the
+  # crew would see in its own worktree (an untracked file there makes the task's
+  # worktree dirty, and an archive refuses a dirty worktree).
+  pidfile=$(mktemp "${TMPDIR:-/tmp}/.fm-stray.XXXXXX") || return 1
+  bash -c 'd=$1; f=$2; cd "$d" || exit 1; shift 2; nohup "$@" >/dev/null 2>&1 & echo $! >"$f"; exit 0' \
+    _ "$dir" "$pidfile" "$@"
+  sleep 0.4
+  pid=$(head -1 "$pidfile" 2>/dev/null)
+  rm -f "$pidfile"
+  [ -n "$pid" ] || return 1
+  printf '%s\n' "$pid" >>"$FM_TEST_PIDFILE"
+  printf '%s\n' "$pid"
+}
+
+fm_kill_stray() { # <pid>
+  kill -9 "$1" 2>/dev/null || true
 }
 
 # fm_iso_ago <seconds>: an ISO-8601 UTC timestamp that many seconds in the past.

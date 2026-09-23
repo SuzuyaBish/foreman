@@ -95,6 +95,14 @@ foreman_meta_set "$ID" parent_workspace "$PARENT_WS"
 foreman_meta_set "$ID" session "$FOREMAN_SESSION"
 foreman_meta_set "$ID" cwd "$CWD"
 
+# Learn what was already running in the crew's directory before the crew
+# existed. An isolated crew owns its worktree, but a --no-isolate crew works
+# inside the captain's own checkout: without this, the captain's own dev server
+# would read as the crew's stray and be stopped when the crew finished. First
+# launch only - a relaunch keeps the original list, because the strays from the
+# run that just died are exactly what the next teardown has to find.
+"$FOREMAN_ROOT/bin/crew-processes.sh" snapshot "$ID" >/dev/null 2>&1 || true
+
 # Placing a crew for a project puts that project in focus, so the todo board
 # follows the work rather than the captain having to say so twice. Best effort:
 # a board that cannot be told is not a reason to fail a launch.

@@ -101,3 +101,34 @@ test_working_and_progress
 test_needs_decision_is_answered_by_key
 test_review_carries_the_pull_request
 test_blocked_done_failed_stopped
+
+# A crew that is finished stops what it started. This is the last moment the
+# machine knows those processes are its: once the task is archived, a stray dev
+# server is just an anonymous port.
+test_finishing_verbs_need_a_clean_directory() {
+  local root dir pid out
+  root=$(fm_tmproot report-teardown)
+  dir="$root/proj"
+  mkdir -p "$dir"
+  fm_task t9 working >/dev/null
+  fm_task_field t9 cwd "$dir"
+
+  pid=$(fm_stray "$dir" sleep 300)
+  if out=$("$REPORT" t9 review "ready" 2>&1); then
+    fail "a review was accepted while a process was still running"
+  fi
+  assert_contains "$out" "cannot report review yet" "the refusal names the report it refused"
+  assert_contains "$out" "sleep 300" "and shows what is still running"
+  assert_contains "$out" "crew_cleanup" "and how to stop it"
+  assert_equals "working" "$(state_of t9)" "the refused report recorded nothing"
+
+  # A crew must always be able to report an obstacle, whatever is running.
+  "$REPORT" t9 blocked "waiting on CI" >/dev/null
+  assert_equals "blocked" "$(state_of t9)" "blocked is never gated"
+
+  "$BIN/crew-processes.sh" kill t9 >/dev/null
+  out=$("$REPORT" t9 review "ready now")
+  assert_contains "$out" "reported t9 review" "the report goes through once the directory is clean"
+  if kill -0 "$pid" 2>/dev/null; then fail "the stray outlived the teardown"; fi
+  pass "a review or done waits until the crew has stopped what it started"
+}

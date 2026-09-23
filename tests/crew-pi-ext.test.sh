@@ -58,6 +58,41 @@ JS
   pass "the crew_report tool drives the report script end to end"
 }
 
+test_the_crew_can_stop_what_it_started() {
+  if ! command -v node >/dev/null 2>&1; then
+    pass "crew_cleanup tool wiring check skipped (no node)"
+    return 0
+  fi
+  local harness out root dir pid
+  harness=$(fm_tmproot crew-cleanup-harness)/harness.mjs
+  cat >"$harness" <<'JS'
+const [, , file, argsJson] = process.argv;
+const mod = await import(file);
+const tools = {};
+const pi = { on: () => {}, registerTool: (t) => { tools[t.name] = t; }, sendUserMessage: () => {} };
+mod.default(pi);
+const res = await tools.crew_cleanup.execute("call-1", JSON.parse(argsJson));
+process.stdout.write("RESULT:" + (res.content?.[0]?.text ?? "") + "\n");
+JS
+  run_cleanup() { node "$harness" "$FOREMAN_HOME/tasks/e1/pi-ext.ts" "$1" 2>&1; }
+
+  root=$(fm_tmproot crew-cleanup-dir)
+  dir="$root/proj"
+  mkdir -p "$dir"
+  printf 'cwd=%s\n' "$dir" >>"$FOREMAN_HOME/tasks/e1/meta"
+
+  out=$(run_cleanup '{"action":"check"}')
+  assert_contains "$out" "nothing is running" "a clean directory says so"
+
+  pid=$(fm_stray "$dir" sleep 300)
+  out=$(run_cleanup '{"action":"check"}')
+  assert_contains "$out" "sleep 300" "check names what the crew left running"
+  out=$(run_cleanup '{"action":"kill"}')
+  assert_contains "$out" "stopped $pid" "kill stops it through the tool"
+  if kill -0 "$pid" 2>/dev/null; then fail "the process survived crew_cleanup"; fi
+  pass "the crew_cleanup tool drives the teardown script end to end"
+}
+
 test_the_poll_output_is_bounded() {
   # `lavish-axi poll` appends a full DOM serialization. A crew's context must not
   # receive it whole, so drive the generated lavish_poll against a fake that
@@ -122,6 +157,8 @@ test_generates_a_bound_extension() {
   assert_contains "$body" "$FOREMAN_HOME" "the foreman home is bound"
   assert_contains "$body" "$BIN/crew-busy-event.sh" "the busy writer is addressed directly"
   assert_contains "$body" "$BIN/crew-report.sh" "the report script is addressed directly"
+  assert_contains "$body" "$BIN/crew-processes.sh" "the teardown script is addressed directly"
+  assert_contains "$body" "crew_cleanup" "the crew can stop what it started"
   pass "the extension is generated and every placeholder is substituted"
 }
 
@@ -177,4 +214,5 @@ test_exposes_the_expected_tools
 test_generation_is_validated
 test_the_generated_file_parses
 test_the_report_tool_drives_the_script
+test_the_crew_can_stop_what_it_started
 test_the_poll_output_is_bounded

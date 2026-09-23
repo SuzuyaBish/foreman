@@ -137,7 +137,10 @@ test_a_real_crew_does_the_whole_trip() {
   wait_for "the Herdr tab to exist" tab_exists
 
   wait_for "the crew reaching a terminal state" settled
-  assert_equals "done" "$(state_of)" "the crew reports done"
+  # The crew's own note is the only thing that explains a live failure, so the
+  # assertion carries it instead of only the state.
+  assert_equals "done" "$(state_of)" \
+    "the crew reports done (it said: $(sed -n 's/^note=//p' "$FOREMAN_HOME/tasks/$ID/status" 2>/dev/null))"
 
   # The work must be real git work, not a sentence claiming work happened.
   assert_present "$WT/GREETING.md" "the crew wrote its file"
@@ -188,6 +191,40 @@ test_a_real_steer_is_delivered_and_acked() {
   pass "the steered change is committed and the crew re-reported"
 }
 
+# The teardown gate and the stop sweep, against the real thing: a real worktree,
+# a real task record, and a real orphaned process. The crew is not asked to leave
+# one - a live model cannot be relied on to misbehave on cue - so the stray is
+# started exactly the way a background job from the crew's own tool shell ends
+# up: orphaned to PID 1, with its cwd inside the worktree.
+test_a_real_stray_is_refused_and_swept() {
+  local pid out
+  pid=$(fm_stray "$WT" sleep 300)
+  assert_equals "1" "$("$BIN/crew-processes.sh" list "$ID" | wc -l | tr -d ' ')" \
+    "a real orphaned process in the real worktree is attributed to the crew"
+
+  # A finishing report is refused, and the refusal leaves no trace: no event, no
+  # pull request in meta.
+  local before
+  before=$(events_n)
+  if out=$("$BIN/crew-report.sh" "$ID" review "ready" --pr https://example.test/o/r/pull/1 2>&1); then
+    fail "a review was accepted while the crew still had a process running"
+  fi
+  assert_contains "$out" "cannot report review yet" "the report is refused"
+  assert_contains "$out" "sleep 300" "the refusal names what is still running"
+  assert_equals "$before" "$(events_n)" "the refused report recorded no event"
+  assert_equals "0" "$(grep -c '^pr=' "$FOREMAN_HOME/tasks/$ID/meta" || true)" \
+    "the refused report recorded no pull request"
+
+  # Stopping the crew takes it with it, so a crew that dies without reporting
+  # still leaves nothing behind.
+  "$BIN/crew-stop.sh" "$ID" --interrupt --reason "e2e: pause for teardown check" >/dev/null ||
+    fail "the interrupt failed"
+  if ! kill -0 "$pid" 2>/dev/null; then fail "an interrupt swept the crew's processes"; fi
+  "$BIN/crew-stop.sh" "$ID" --exit --reason "e2e: teardown check" >/dev/null || fail "the exit failed"
+  if kill -0 "$pid" 2>/dev/null; then fail "the stop left the crew's process running"; fi
+  pass "a real stray is refused at the gate and swept by the stop"
+}
+
 test_the_task_retires_cleanly() {
   local tab=$TAB
   "$BIN/crew-stop.sh" "$ID" --close --reason "e2e complete" >/dev/null ||
@@ -205,4 +242,5 @@ test_the_task_retires_cleanly() {
 
 test_a_real_crew_does_the_whole_trip
 test_a_real_steer_is_delivered_and_acked
+test_a_real_stray_is_refused_and_swept
 test_the_task_retires_cleanly

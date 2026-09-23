@@ -245,6 +245,36 @@ Idle at its prompt with nothing reported, or mid-turn with no progress — eithe
 way it raises one wake per episode, so a crew that quietly stopped cannot sit
 silent. Progress clears the episode; `0` disables the check.
 
+## Teardown
+
+A crew member starts things — a dev server, a file watcher, a test runner, an
+emulator — and when it finishes they keep running, holding ports and CPU long
+after the task is done. So a `review` or `done` report is **refused** while
+anything the crew started is still up, and the refusal names it:
+
+```
+cannot report review yet: this crew still has work running.
+
+41234	npm run dev
+41235	node ./node_modules/.bin/vite
+
+Stop it first - crew_cleanup(action="kill"), or:
+  .../bin/crew-processes.sh kill parser-fix
+```
+
+The crew has a `crew_cleanup` tool for exactly this (`check`, then `kill`), and
+stopping a crew sweeps whatever it left — so a crew that dies without reporting
+still leaves nothing behind. `blocked`, `needs-decision` and `failed` are never
+gated: a crew must always be able to report an obstacle or ask a question.
+
+Finding those processes is not by name. The shell that started a background job
+exits, and the job is reparented to PID 1, so it keeps no readable link to the
+crew. The one thing that survives is its **working directory**, so anything
+running inside the crew's worktree is its own — and with `--no-isolate`, where
+that directory is your own checkout, whatever was already running there when the
+crew launched is excluded. A Lavish board is deliberately left up for you to
+annotate.
+
 ## Lavish review boards
 
 `lavish-axi` turns an HTML artifact into a board you can annotate in the browser.
@@ -309,6 +339,7 @@ FOREMAN_E2E=1 FOREMAN_E2E_REPO=<owner>/<name> \
 | `bin/crew-spawn.sh <id> --project <p> <task…>` | worktree + pane + fresh pi |
 | `bin/crew-list.sh` | todo + crew board; regenerates `BOARD.md` |
 | `bin/crew-report.sh <id> <verb> [note] [--key K] [--pr URL]` | *crew side:* record an event |
+| `bin/crew-processes.sh list\|count\|kill\|snapshot <id>` | *crew side:* what this crew still has running, and the teardown |
 | `bin/crew-decide.sh <id> <key> <answer…>` | answer a crew decision |
 | `bin/crew-busy.sh <id>` / `bin/crew-busy-event.sh` | semantic turn state |
 | `bin/crew-queue.sh` | the durable wake queue |

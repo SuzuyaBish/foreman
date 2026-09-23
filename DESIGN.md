@@ -255,6 +255,61 @@ second one. And a task whose record predates this — it names the foreman's own
 workspace and has no parent — owns nothing: closing it closes its tab, never the
 captain's workspace.
 
+## Teardown
+
+A crew member starts things: a dev server, a file watcher, a test runner, an
+emulator. When it finishes, they keep running. That is not a tidiness problem —
+the process holds a port and its CPU for the rest of the session, and once the
+task is archived nothing on the machine remembers it belonged to a crew at all.
+
+So a `review` or a `done` report is **refused** while anything this crew started
+is still up, and the refusal lists it and says how to stop it (`crew_cleanup`,
+the crew-side tool). `blocked`, `needs-decision` and `failed` are never gated: a
+crew must always be able to report an obstacle or ask for a decision. Stopping a
+crew sweeps too, so a crew that dies without reporting leaves nothing behind —
+except on `--interrupt`, which is a pause rather than a stop.
+
+Finding those processes is the whole difficulty, and it is solved by
+**attribution, not by guessing at names**. The obvious signals all fail. The
+shell that started a background job exits and the job is reparented to PID 1, so
+its process tree link is gone; its environment cannot be read back afterwards
+(`ps -E` reports nothing for a reparented process on macOS — checked); its
+process group is the transient one of the tool call; and
+`herdr pane process-info` only ever lists the pane's own foreground group (also
+checked: a reparented `sleep` was invisible to it).
+
+What does survive is the **working directory**. `lsof -d cwd` reports the cwd of
+every process on the machine in about 60ms, so a process whose cwd is inside the
+crew's worktree is attributable to that crew, and one that is not, is not. The
+anchor is the worktree when the task has one, else the crew's cwd. That second
+case is the risk: a `--no-isolate` crew works inside the captain's own checkout,
+where the captain's own dev server also lives. So the launch records the pids
+already in the directory (`processes-at-launch`) and those are excluded — first
+launch only, because re-snapshotting on a relaunch would launder exactly the
+strays the next teardown has to find.
+
+Protection is by identity rather than by pattern: the crew's agent, everything
+still descended from it (MCP servers, a tool call in flight), its ancestors, and
+two kinds of exception. `lavish-axi`, whose own contract is to stay up while the
+captain annotates a board and to stop itself when the last session ends; and a
+machine-wide daemon the crew merely triggered — the `adb` server owns a fixed
+port other tools are already talking to, so stopping it is collateral damage.
+Ancestors and descendants are computed separately on purpose — expanding one
+from the other would protect the whole multiplexer's worth of sibling processes.
+
+Two rules keep the probe honest about itself. It reads the process table and the
+cwd scan with its working directory *outside* the anchor, because its own `lsof`
+and `awk` would otherwise carry the crew's cwd and the run that is looking for
+strays would report one — which is not hypothetical: it refused a real crew's
+`done` report before the fix. And a pid the process table cannot name is never
+blamed: it is either the scan itself (born after the table was read) or
+something that has already exited.
+
+When the probe itself is broken (no `lsof`, no anchor to attribute to) it exits
+3 and every caller fails **open**. A teardown that guessed would be worse than
+one that did nothing, and a probe that cannot see must not hold a crew's work
+hostage.
+
 ## Scopes
 
 One harness serves many projects, and the todo list is where that would

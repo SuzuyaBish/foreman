@@ -37,6 +37,7 @@ export default function (pi: any) {
   const ID = "__ID__";
   const BUSY = "__BUSY_EVENT__";
   const REPORT = "__REPORT__";
+  const PROCESSES = "__PROCESSES__";
 
   // `lavish-axi` results end with a full DOM serialization of the artifact. It
   // is the largest part of the response and it is not the feedback, so trim it
@@ -114,6 +115,45 @@ export default function (pi: any) {
               content: [{ type: "text", text: text || (err ? String(err) : "reported") }],
               details: undefined,
             });
+          },
+        );
+      });
+    },
+  });
+
+  // The crew's own teardown. `crew_report` refuses a review or a done while
+  // anything this crew started is still running, and this is the verb that makes
+  // that refusal actionable in one step: look, then stop.
+  pi.registerTool({
+    name: "crew_cleanup",
+    label: "Stop what I started",
+    description:
+      "What this crew still has running, and how to stop it. Run action=\"check\"\n" +
+      "before you report review or done. A dev server, a file watcher, a test runner\n" +
+      "or an emulator you leave behind keeps holding its port and its CPU after this\n" +
+      "task is finished - and once the task is archived, nothing on the machine\n" +
+      "knows those processes were ever yours. action=\"kill\" stops them: TERM\n" +
+      "first, then KILL for anything that ignores it.\n\n" +
+      "A Lavish board is deliberately left alone: it stays up while the captain\n" +
+      "annotates it.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["check", "kill"], description: "check or kill" },
+      },
+      required: ["action"],
+    },
+    async execute(_toolCallId: string, params: any) {
+      const verb = params.action === "kill" ? "kill" : "list";
+      return await new Promise((resolve: any) => {
+        execFile(
+          PROCESSES,
+          [verb, ID],
+          { env: { ...process.env, FOREMAN_HOME: HOME }, maxBuffer: 1024 * 1024 },
+          (err: any, stdout: string, stderr: string) => {
+            let text = `${stdout || ""}${stderr || ""}`.trim();
+            if (!text) text = verb === "kill" ? "nothing was running" : "nothing is running";
+            resolve({ content: [{ type: "text", text }], details: undefined });
           },
         );
       });
@@ -225,6 +265,7 @@ sed -e "s|__ID__|$ID|g" \
   -e "s|__HOME__|$FOREMAN_HOME|g" \
   -e "s|__BUSY_EVENT__|$FOREMAN_ROOT/bin/crew-busy-event.sh|g" \
   -e "s|__REPORT__|$FOREMAN_ROOT/bin/crew-report.sh|g" \
+  -e "s|__PROCESSES__|$FOREMAN_ROOT/bin/crew-processes.sh|g" \
   "$TMP" >"$TARGET"
 rm -f "$TMP"
 printf '%s\n' "$TARGET"

@@ -86,3 +86,39 @@ test_exit_quits_the_agent_and_retires_busy
 test_close_closes_the_tab
 test_stop_closes_a_tab_when_the_pane_is_already_gone
 test_reason_is_recorded
+
+# A stop is a stop: a detached dev server is orphaned to PID 1, so closing the
+# pane would not touch it - the port would stay held for the rest of the session.
+test_stopping_takes_what_the_crew_left_running() {
+  local root dir pid out
+  root=$(fm_tmproot stop-sweep)
+  dir="$root/proj"
+  mkdir -p "$dir"
+  fm_task t7 working >/dev/null
+  fm_attach_pane t7 >/dev/null
+  fm_task_field t7 cwd "$dir"
+  pid=$(fm_stray "$dir" sleep 300)
+
+  out=$("$STOP" t7 --close)
+  assert_contains "$out" "stopped $pid" "a close reports what it stopped"
+  if kill -0 "$pid" 2>/dev/null; then fail "a stopped crew left a process running"; fi
+  pass "stopping a crew stops what it left running"
+}
+
+# An interrupt is a pause, not a stop: the agent keeps running, and it may still
+# be using what it started.
+test_interrupt_leaves_the_crews_processes_alone() {
+  local root dir pid
+  root=$(fm_tmproot stop-keep)
+  dir="$root/proj"
+  mkdir -p "$dir"
+  fm_task t8 working >/dev/null
+  fm_attach_pane t8 >/dev/null
+  fm_task_field t8 cwd "$dir"
+  pid=$(fm_stray "$dir" sleep 300)
+
+  "$STOP" t8 >/dev/null
+  if ! kill -0 "$pid" 2>/dev/null; then fail "an interrupted crew's processes were stopped"; fi
+  fm_kill_stray "$pid"
+  pass "an interrupt leaves the crew's processes alone"
+}

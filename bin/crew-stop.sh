@@ -39,11 +39,21 @@ retire_busy() {
   [ -z "$GEN" ] || "$FOREMAN_ROOT/bin/crew-busy-event.sh" retire "$FOREMAN_HOME" "$ID" --gen "$GEN" >/dev/null 2>&1 || true
 }
 
+# Stop what the crew left running. Its pane going away does not stop a detached
+# dev server - that is orphaned to PID 1 and would hold its port for the rest of
+# the session. Never on --interrupt: the agent is still running and may still be
+# using what it started, so that is a pause, not a stop. Best effort: a teardown
+# that cannot see the process table must not fail the stop.
+sweep_processes() {
+  "$FOREMAN_ROOT/bin/crew-processes.sh" kill "$ID" 2>/dev/null || true
+}
+
 PANE=$(foreman_pane_of "$ID" 2>/dev/null || true)
 if [ -z "$PANE" ]; then
   foreman_event_append "$ID" stopped "" "${REASON:-stop requested but the recorded pane is gone}"
   foreman_status_sync "$ID"
   retire_busy
+  sweep_processes
   # A pane can vanish while its tab survives (a crashed agent, a killed shell),
   # so a close still closes the home this foreman created for the task.
   if [ "$MODE" = --close ]; then
@@ -84,6 +94,7 @@ case "$MODE" in
   fi
   foreman_status_sync "$ID"
   retire_busy
+  sweep_processes
   if [ "$MODE" = "--close" ]; then
     case "$(foreman_close_home "$ID")" in
     workspace) printf 'exited %s (%s) and closed its workspace\n' "$ID" "$confirmed" ;;
