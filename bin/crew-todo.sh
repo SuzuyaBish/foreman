@@ -434,11 +434,18 @@ summary)
         printf "all scopes: %d items (%d open, %d active, %d done%s)\n", n, O, A, D, (P > 0 ? sprintf(", %d proposed", P) : "")
       } else {
         line(scope)
+        # Outstanding work elsewhere: `open` and `active` alike, each named, so
+        # a project with a crew mid-flight is not silently dropped. A done item
+        # is not work and a proposal belongs to no captain row.
         tail = ""
         for (g = 1; g <= gn; g++) {
           s = names[g]
-          if (s == scope || o[s] == 0) continue
-          tail = tail sprintf("%s%s %d open", (tail == "" ? "" : ", "), s, o[s])
+          if (s == scope) continue
+          co = o[s]; ca = a[s]
+          if (co == 0 && ca == 0) continue
+          bits = (co > 0 ? co " open" : "")
+          if (ca > 0) bits = bits (bits != "" ? ", " : "") ca " active"
+          tail = tail sprintf("%s%s %s", (tail == "" ? "" : ", "), s, bits)
         }
         if (tail != "") printf " · also %s", tail
         printf "\n"
@@ -490,11 +497,15 @@ list)
         if (notes == 1 && nt[i] != "" && nt[i] != "-") printf "%-26s ↳ %s\n", "", nt[i]
       }
     }
-    function tail_of(   g, s, t) {
+    function tail_of(   g, s, t, co, ca, bits) {
       for (g = 1; g <= an; g++) {
         s = allorder[g]
-        if (s == scope || open[s] == 0) continue
-        t = t sprintf("%s%s %d open", (t == "" ? "" : ", "), s, open[s])
+        if (s == scope) continue
+        co = open[s]; ca = act[s]
+        if (co == 0 && ca == 0) continue
+        bits = (co > 0 ? co " open" : "")
+        if (ca > 0) bits = bits (bits != "" ? ", " : "") ca " active"
+        t = t sprintf("%s%s %s", (t == "" ? "" : ", "), s, bits)
       }
       return t
     }
@@ -502,6 +513,7 @@ list)
     {
       s0 = ($6 == "" ? "foreman" : $6)
       if ($2 == "open") open[s0]++
+      else if ($2 == "active") act[s0]++
       if (!(s0 in allseen)) { allseen[s0] = 1; an++; allorder[an] = s0 }
       # A proposal is a suggestion from the foreman, never the captain work,
       # so it is kept off the board even with `--all`. `proposals` is its view.
@@ -521,9 +533,10 @@ list)
         printf "  (nothing in %s)\n", (scope == "*" ? "any scope" : scope)
       }
       if (scope != "*") {
-        # Scoping must never hide queued work silently: say what is elsewhere.
+        # Scoping must never hide queued work silently: name what is elsewhere,
+        # open and active alike, each with the status it is in.
         t = tail_of()
-        if (t != "") printf "\n  open elsewhere: %s (crew-todo.sh list --all)\n", t
+        if (t != "") printf "\n  elsewhere: %s (crew-todo.sh list --all)\n", t
       }
     }
   ' "$TODO"
