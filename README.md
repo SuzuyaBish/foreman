@@ -29,7 +29,7 @@ pi
 That is the whole thing. Pi loads `.pi/extensions/foreman.ts` because it is
 project-local, and `AGENTS.md` as standing instructions. The first time in a
 fresh clone, approve Pi's project-trust prompt: project extensions are not loaded
-before the project is trusted, and approving is once per clone. `foreman/bin/foreman`
+before the project is trusted, and approving is once per clone. `bin/foreman`
 does the same thing after creating `projects/` and `worktrees/`; it does not name
 the extension with `-e`, because doing that *as well* would load it twice.
 
@@ -41,7 +41,7 @@ everywhere else — even after a reload — has no widget, no status line, no
 `crew_*` tools and no digest. That is deliberate: installing the extension
 globally would start its auto-wake watcher in every session, in every project.
 
-Every session starts the same way: the foreman reads `foreman/HANDOFF.md` (the
+Every session starts the same way: the foreman reads `HANDOFF.md` (the
 standing architecture and traps) and then `crew_todo` (the durable plan), as
 `AGENTS.md` instructs. It is also handed a one-line `crew digest:` and, once,
 the previous session's dated handoff note — both orientation, not the plan.
@@ -229,7 +229,7 @@ nothing is wiped, and a note the next session never replaces is skipped rather
 than replayed forever. `crew_handoff` with no text reads the current note back on
 demand.
 
-That note is separate from `foreman/HANDOFF.md`, which is the standing
+That note is separate from `HANDOFF.md`, which is the standing
 architecture and traps doc: kept and edited, never consumed.
 
 ## Busy state

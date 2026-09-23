@@ -216,7 +216,7 @@ from the session that just ended is delivered once at the next start; a note the
 next session never replaces falls behind the marker and is skipped rather than
 replayed into every future session. `show` always reads it back on demand.
 
-This is why there are two documents and not one: `foreman/HANDOFF.md` is the
+This is why there are two documents and not one: `HANDOFF.md` is the
 standing architecture/traps doc that must survive being read, while
 `.foreman/handoff.md` is the dated, single-use narrative. One file would keep
 trying to wipe the part that is still useful.
