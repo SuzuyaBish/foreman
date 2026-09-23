@@ -13,6 +13,8 @@
 #   --base <ref>       worktree base (default HEAD)
 #   --model <model>    model for this crew member (default: config crewModel)
 #   --thinking <lvl>   low|medium|high|xhigh|max (default: config crewThinking)
+#   --todo <n>         the todo item this work fulfils; warns if a crew is
+#                      already linked to it (reuse that crew instead)
 #   -- <text>          everything after this is task text
 set -eu
 
@@ -31,11 +33,12 @@ MODEL=
 THINKING=
 BASE=HEAD
 EXPLICIT_BASE=0
+TODO_LINK=
 PARTS=()
 seen_target=0
 while [ $# -gt 0 ]; do
   case "$1" in
-  --project | --cwd | --model | --thinking | --base | --delivery)
+  --project | --cwd | --model | --thinking | --base | --delivery | --todo)
     need_val "$@"
     case "$1" in
     --project)
@@ -48,6 +51,7 @@ while [ $# -gt 0 ]; do
       ;;
     --model) MODEL=$2 ;;
     --thinking) THINKING=$2 ;;
+    --todo) TODO_LINK=$2 ;;
     --base)
       BASE=$2
       EXPLICIT_BASE=1
@@ -111,6 +115,32 @@ fi
 
 DIR=$(foreman_task_dir "$ID")
 [ ! -e "$DIR" ] || foreman_die "crew task '$ID' already exists; archive it or pick another id"
+
+# Reuse is the default for follow-up work on an item (AGENTS.md, "Work"). When
+# the spawn names the item it fulfils, we can see that a crew is already linked
+# to it and say so. A warning, never a refusal: spawn cannot tell an exhausted
+# or rejected crew from a good candidate, and a wrong refusal costs more than a
+# wrong warning. Without --todo nothing names the item, so there is nothing to
+# check; the crew_spawn tool must forward the number for this to fire.
+if [ -n "$TODO_LINK" ]; then
+  case "$TODO_LINK" in
+  '' | *[!0-9]*) foreman_die "--todo needs a todo item number, not '$TODO_LINK'" ;;
+  esac
+  LINKED=$(awk -F'\t' -v s="$TODO_LINK" '$1 == s && $3 != "" && $3 != "-" { c = $3 } END { if (c != "") print c }' \
+    "$FOREMAN_HOME/todo.tsv" 2>/dev/null || true)
+  if [ -n "$LINKED" ] && [ -d "$(foreman_task_dir "$LINKED")" ]; then
+    LSTATE=$(foreman_status_get "$LINKED" state 2>/dev/null || printf '?')
+    printf 'warning: todo #%s is already linked to crew %s (%s); follow-up work belongs to that crew. ' \
+      "$TODO_LINK" "$LINKED" "$LSTATE" >&2
+    if foreman_pane_of "$LINKED" >/dev/null 2>&1; then
+      printf 'Steer it: crew_send %s "<the new requirement>".\n' "$LINKED" >&2
+    else
+      printf 'Its instance is gone; recover it in place: crew_recover --relaunch %s.\n' "$LINKED" >&2
+    fi
+    printf 'Spawn %s anyway only if this is a genuinely different piece of work (a new item), or %s is exhausted or its work was rejected.\n' \
+      "$ID" "$LINKED" >&2
+  fi
+fi
 
 WT=
 PROJ=

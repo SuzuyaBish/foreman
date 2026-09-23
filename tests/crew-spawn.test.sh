@@ -196,6 +196,60 @@ test_spawn_surfaces_a_stale_base() {
   pass "an isolated spawn from a stale base tells the foreman"
 }
 
+test_reuse_warning_for_a_linked_item() {
+  local dir out seq
+  dir=$(fm_tmproot reuse-cwd)
+  fm_task reuse-owner working >/dev/null
+  fm_attach_pane reuse-owner >/dev/null
+  "$BIN/crew-todo.sh" add --project proj "sharpen the house lines" >/dev/null
+  seq=$(cut -f1 "$FOREMAN_HOME/todo.tsv" | tail -1)
+  "$BIN/crew-todo.sh" start "$seq" reuse-owner >/dev/null
+
+  out=$("$SPAWN" reuse-second "$dir" --todo "$seq" "the sharpened task" 2>&1)
+  assert_contains "$out" "already linked to crew reuse-owner" "a spawn for a linked item warns"
+  assert_contains "$out" "crew_send reuse-owner" "the warning names the reuse command"
+  assert_contains "$out" "launched reuse-second" "a warning is not a refusal: the spawn still happens"
+  assert_present "$TASKDIR/reuse-second/brief.md" "the warned spawn still creates the crew"
+
+  # A linked crew whose instance is gone gets the recovery path, not a send.
+  fm_task reuse-lost done >/dev/null
+  "$BIN/crew-todo.sh" start "$seq" reuse-lost >/dev/null
+  out=$("$SPAWN" reuse-third "$dir" --todo "$seq" "another pass" 2>&1)
+  assert_contains "$out" "recover it in place: crew_recover --relaunch reuse-lost" \
+    "a linked crew whose pane is gone points at recovery"
+  pass "a spawn for an item that already has a crew warns and still goes ahead"
+}
+
+test_spawn_does_not_warn_for_a_clean_item() {
+  local dir out seq
+  dir=$(fm_tmproot clean-cwd)
+  "$BIN/crew-todo.sh" add --project proj "brand new work" >/dev/null
+  seq=$(cut -f1 "$FOREMAN_HOME/todo.tsv" | tail -1)
+
+  out=$("$SPAWN" clean-first "$dir" --todo "$seq" "new item" 2>&1)
+  assert_not_contains "$out" "already linked" "an unlinked item does not warn"
+  assert_contains "$out" "launched clean-first" "the spawn proceeds"
+
+  "$BIN/crew-todo.sh" start "$seq" clean-first >/dev/null
+  out=$("$SPAWN" clean-second "$dir" --todo "$seq" "genuinely different work" 2>&1)
+  assert_contains "$out" "already linked to crew clean-first" "a live linked crew does warn"
+
+  # A link pointing at a crew that is gone (archived, or never really there) is
+  # not live work, so it is not a reason to warn.
+  "$BIN/crew-todo.sh" start "$seq" ghost-crew >/dev/null
+  out=$("$SPAWN" clean-third "$dir" --todo "$seq" "genuinely different work" 2>&1)
+  assert_not_contains "$out" "already linked" "a link to a gone crew does not warn"
+
+  # No --todo means spawn cannot know the item, so it cannot warn.
+  out=$("$SPAWN" clean-fourth "$dir" "no item named" 2>&1)
+  assert_not_contains "$out" "already linked" "a spawn that names no item does not warn"
+
+  if "$SPAWN" bad-todo "$dir" --todo xx task >/dev/null 2>&1; then
+    fail "a non-numeric --todo was accepted"
+  fi
+  pass "only a live linked crew warns, and --todo is validated"
+}
+
 test_workspace_resolution() {
   local dir ws
   dir=$(fm_tmproot workspace)
@@ -229,4 +283,6 @@ test_arguments_are_validated
 test_double_dash_and_model_options
 test_spawn_surfaces_uncommitted_checkout_work
 test_spawn_surfaces_a_stale_base
+test_reuse_warning_for_a_linked_item
+test_spawn_does_not_warn_for_a_clean_item
 test_workspace_resolution

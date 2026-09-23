@@ -102,6 +102,15 @@ project plan:
 - The one exception is pieces that must touch the same files: **sequence those,
   never run them together.** Two crews editing one file guarantees a conflicted
   merge and splits the truth across two branches.
+- **Follow-up work on an item goes back to the crew that already holds that
+  item's context.** A sharpened requirement, a correction, a second pass — that
+  is the same piece of work, so steer the live crew with `crew_send`; its pane,
+  worktree and context are all still there, and a fresh crew starts blind while
+  the old one sits idle. Spawning a second crew for one item while the first
+  still exists is the failure. A genuinely different piece of work is a new item
+  and a new crew. A crew whose context is exhausted or whose work was rejected
+  is replaced, and a crew whose instance is gone is recovered in its existing
+  worktree (see Recovery) — never respawned under a new id.
 - Breadth is the point. Your own context is the scarce resource, so a piece whose
   output you would have to read is crew work — and several such pieces should be
   in flight together. The rationale is in `DESIGN.md`.
