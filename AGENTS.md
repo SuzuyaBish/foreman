@@ -145,6 +145,11 @@ Work in a project is delivered as a pull request. A crew member commits on its
 pane, worktree and branch all stay — the instance is held open on purpose, so the
 captain can read the diff or push the crew further.
 
+- **The same rule binds you.** Your own changes to this repository go through a
+  pull request too: commit on a branch, push it, open the PR, and let the captain
+  accept it. Never push to `main`. Admin rights will let such a push through and
+  GitHub will only warn — that is a bypass of the repo's own rule, not permission
+  to use it.
 - **Never merge without the captain's explicit go-ahead.** When they give it, use
   `crew_merge`. Merging is their decision, not yours.
 - Never archive a task in `review`, and never archive with `force` unless they
