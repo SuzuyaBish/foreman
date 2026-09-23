@@ -287,6 +287,7 @@ test_the_chrome_is_scoped_to_the_project_in_focus() {
 
   assert_contains "$status" "todo 0/1 Example_App" "the status line counts the project in focus"
   assert_contains "$status" "+1 open elsewhere" "queued work in another scope is counted, never hidden"
+  assert_not_contains "$status" "proposed" "a board with no suggestions shows no proposal count"
   assert_contains "$widget" "sheet background" "the widget shows the project's item"
   assert_not_contains "$widget" "tidy the chrome" "the widget does not show another scope's item"
 
@@ -402,6 +403,43 @@ test_an_enormous_item_is_truncated_and_keeps_the_budget() {
   pass "a long item row is truncated to one line and the rows after it survive"
 }
 
+# The board is the captain's, so the foreman's own suggestions are held apart:
+# counted on the status line, never mixed into the captain's rows. The count has
+# to appear when proposals exist and stay absent when they do not, and the
+# widget's six-line budget and relevance ordering must survive them untouched.
+test_a_proposal_is_counted_apart_and_never_a_captain_row() {
+  local h out status widget bits todo proposed lines
+  h=$(fm_tmproot chrome-proposals)/home
+  mkdir -p "$h/tasks/c-alpha"
+  printf 'state=working\nat=%s\nnote=busy\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/c-alpha/status"
+  printf '1\topen\t-\tfinish the widget\t-\tforeman\n2\tproposed\t-\tadd a metrics tab\twe may need numbers\tforeman\n3\tproposed\t-\tprefetch the index\tit is slow\tforeman\n' \
+    >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  status=$(printf '%s\n' "$out" | sed -n 's/^STATUS|//p')
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+  bits=$(printf '%s\n' "$status" | awk -F' · ' '{ for (i = 1; i <= NF; i++) print $i }')
+
+  # The count is there, muted, and the captain's own total is unchanged by it.
+  assert_contains "$status" "[[muted]]2 proposed" "the proposal count is muted and separate"
+  assert_contains "$status" "todo 0/1" "the captain's board counts only their items"
+
+  # It trails the todo count: the board first, then the suggestions held apart.
+  todo=$(line_of "$bits" "todo 0/1")
+  proposed=$(line_of "$bits" "2 proposed")
+  [ -n "$todo" ] && [ -n "$proposed" ] || fail "the status line lost a count: $status"
+  [ "$todo" -lt "$proposed" ] || fail "the proposal count must trail the todo count: $status"
+
+  # A proposal is not the captain's work and never renders as one of their rows.
+  assert_contains "$widget" "finish the widget" "the captain's item still renders"
+  assert_not_contains "$widget" "add a metrics tab" "a proposal never renders as a captain row"
+  assert_not_contains "$widget" "#2" "a proposal number is not a captain row either"
+
+  lines=$(printf '%s\n' "$widget" | grep -c .)
+  [ "$lines" -le 6 ] || fail "the widget grew past its budget ($lines lines)"
+  pass "a proposal is counted apart and never takes a captain's row"
+}
+
 test_the_status_line_leads_with_what_is_owed
 test_the_widget_ranks_and_tiers_the_crew
 test_the_widget_can_be_turned_off
@@ -409,3 +447,4 @@ test_calm_mode_hides_the_foremans_tool_calls
 test_the_chrome_is_scoped_to_the_project_in_focus
 test_the_widget_keeps_the_in_flight_item_ahead_of_older_queued_ones
 test_an_enormous_item_is_truncated_and_keeps_the_budget
+test_a_proposal_is_counted_apart_and_never_a_captain_row

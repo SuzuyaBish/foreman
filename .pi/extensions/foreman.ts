@@ -134,18 +134,25 @@ const crewTodo = defineTool({
 	name: "crew_todo",
 	label: "Todo list",
 	description:
-		"The durable project todo list. It outlives this session: a new session reads " +
-		"it and knows what is queued, in flight, and finished. Use `action: add` to " +
-		"capture requirements as items, `list` to answer what is left, `start` to link " +
-		"an item to the crew member working on it, and `done`/`open`/`drop` to settle " +
-		"one by hand. Rows linked to crew are reconciled automatically. " +
-		"Items are scoped by project: one harness serves many projects, and `list` " +
-		"shows the scope in focus (the project of the newest crew, unless set), so " +
-		"work for one project never reads as another's. Pass `project` on add to " +
-		"file an item elsewhere, and `show: all` to see every scope grouped.",
+		"The durable project todo list, kept in two tiers. It outlives this session: " +
+		"a new session reads it and knows what is queued, in flight, and finished. " +
+		"The captain's board is theirs alone: `add` puts an item straight on it, " +
+		"`list` reads it back, `start` links an item to the crew member working on " +
+		"it, and `done`/`open`/`drop` settle one by hand. Rows linked to crew are " +
+		"reconciled automatically. " +
+		"The foreman never adds to the board on its own initiative. An idea it notices " +
+		"while working is a *proposal*: `propose` files it apart with a one-line `note` " +
+		"reason, `proposals` returns the table to show the captain, and `approve` is " +
+		"the captain's act that promotes it to the board, keeping the number they " +
+		"already read. Approval is never assumed, and `drop` declines it. An item the " +
+		"captain explicitly asks for goes straight on with `add`. " +
+		"Items are scoped by project: one harness serves many projects, and `list` and " +
+		"`proposals` read the scope in focus (the project of the newest crew, unless " +
+		"set), so work for one project never reads as another's. Pass `project` to file " +
+		"an item elsewhere, and `show: all` to see every scope grouped.",
 	parameters: Type.Object({
 		action: Type.String({
-			description: "add | list | start | done | open | drop",
+			description: "add | propose | proposals | approve | list | start | done | open | drop",
 		}),
 		items: Type.Optional(
 			Type.Array(Type.String(), {
@@ -156,15 +163,21 @@ const crewTodo = defineTool({
 		crew: Type.Optional(
 			Type.String({ description: "For start: the crew task id doing the work" }),
 		),
+		note: Type.Optional(
+			Type.String({
+				description:
+					"For propose: the one-line reason the captain sees beside the suggestion",
+			}),
+		),
 		project: Type.Optional(
 			Type.String({
 				description:
-					"For add: the project this work belongs to, e.g. the project name a crew was " +
-					"spawned into. Defaults to the scope in focus.",
+					"For add/propose: the project this work belongs to, e.g. the project name a " +
+					"crew was spawned into. Defaults to the scope in focus.",
 			}),
 		),
 		show: Type.Optional(
-			Type.String({ description: "For list: open, or all (every scope grouped)" }),
+			Type.String({ description: "For list/proposals: open, or all (every scope grouped)" }),
 		),
 	}),
 	async execute(_id, params) {
@@ -178,6 +191,35 @@ const crewTodo = defineTool({
 				out.push(await run("crew-todo.sh", args, 500));
 			}
 			return { content: [{ type: "text", text: out.join("\n") }], details: undefined };
+		}
+		if (action === "propose") {
+			// The foreman's own suggestion: filed apart with its reason, never the
+			// captain's board. It waits for the captain's `approve`.
+			const items: string[] = params.items?.length ? params.items : [];
+			if (items.length === 0) throw new Error("propose needs one or more items");
+			const out: string[] = [];
+			for (const item of items) {
+				const args = ["propose"];
+				if (params.note) args.push("--note", params.note);
+				if (params.project) args.push("--project", params.project);
+				args.push(item);
+				out.push(await run("crew-todo.sh", args, 500));
+			}
+			return { content: [{ type: "text", text: out.join("\n") }], details: undefined };
+		}
+		if (action === "proposals") {
+			// Exactly what `crew-todo.sh proposals` prints: the table of pending
+			// suggestions, number, text and reason, for showing the captain.
+			const args = ["proposals"];
+			if (params.show === "all") args.push("--all");
+			if (params.project) args.push("--project", params.project);
+			const text = await run("crew-todo.sh", args);
+			return { content: [{ type: "text", text }], details: undefined };
+		}
+		if (action === "approve") {
+			if (params.id === undefined) throw new Error("approve needs id");
+			const text = await run("crew-todo.sh", ["approve", String(params.id)], 500);
+			return { content: [{ type: "text", text }], details: undefined };
 		}
 		if (action === "list") {
 			// No `--all` by default: the board reads the scope in focus, which is the
@@ -1047,11 +1089,18 @@ function updateChrome(ctx: ExtensionContext) {
 	// Scoped: one harness serves many projects, so the board reads the project in
 	// focus. Queued work in another scope is counted, never silently dropped.
 	const scope = todoScope();
-	const todo = allTodo.filter((t) => (t.scope || "foreman") === scope);
+	// Two tiers, and the rule that keeps them apart lives here: a proposal is the
+	// foreman's own suggestion, not the captain's work, so it is filtered out of
+	// `todo` — the captain's board — before anything renders it. The widget cannot
+	// show one, and `crew-todo.sh list` skips `proposed` for the same reason. A
+	// proposal surfaces only as the separate count on the status line below, and
+	// `crew_todo proposals` is where the suggestions themselves are read.
+	const todo = allTodo.filter((t) => (t.scope || "foreman") === scope && t.status !== "proposed");
+	const proposed = allTodo.filter((t) => (t.scope || "foreman") === scope && t.status === "proposed");
 	const done = todo.filter((t) => t.status === "done").length;
 	const elsewhere = allTodo.filter((t) => t.status === "open" && (t.scope || "foreman") !== scope).length;
 
-	if (rows.length === 0 && todo.length === 0 && elsewhere === 0) {
+	if (rows.length === 0 && todo.length === 0 && proposed.length === 0 && elsewhere === 0) {
 		ctx.ui.setStatus("foreman", undefined);
 		ctx.ui.setWidget("foreman", undefined);
 		return;
@@ -1083,6 +1132,10 @@ function updateChrome(ctx: ExtensionContext) {
 		const tail = elsewhere ? ` · +${elsewhere} open elsewhere` : "";
 		bits.push(fg("muted", `${label}${tail}`));
 	}
+	// Proposals are counted apart from the captain's board, in their own muted
+	// bit, and only when there are some, so a board with no suggestions reads
+	// exactly as it did before they existed.
+	if (proposed.length) bits.push(fg("muted", `${proposed.length} proposed`));
 	ctx.ui.setStatus("foreman", bits.join(" · "));
 
 	if (!configFlag("crewWidget", true)) {
@@ -1101,6 +1154,10 @@ function updateChrome(ctx: ExtensionContext) {
 	// therefore never loses its line to an older queued item, so the `active`
 	// row the captain expects from `N working` is always on the board.
 	const linked = new Set(crewShown.map((r) => r.id));
+	// Proposals are absent from `todo` by construction (see the top of
+	// updateChrome), so no suggestion can ever take a line from the captain's
+	// board. The widget is the captain's alone; the `N proposed` count on the
+	// status line is the only place one shows.
 	const queued = todo.filter((t) => t.status !== "done");
 	const todoShown = [
 		...queued.filter((t) => t.crew && linked.has(t.crew)),
