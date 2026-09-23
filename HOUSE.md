@@ -11,7 +11,7 @@ when you say so, sends a prompt to the session already working there.
 ## What an area is
 
 An area is not a git project and not a crew task. It is any ongoing thread you
-keep in your head: *the four Nedbank chats*, *the investor pitch*, *roboteur*,
+keep in your head: *the four Harbour chats*, *the Lighthouse deck*, *Atlas*,
 *the brand skill*. You name them. Their truth lives in House's chart under
 `$FOREMAN_HOME/house/areas/<slug>.md` — plain text, greppable, yours to edit —
 not in git.
@@ -36,11 +36,11 @@ what you want and House picks the tool:
 
 | You say | House does |
 |---|---|
-| "track the investor pitch as a deck" | opens a chart (`house_areas`) |
+| "track the lighthouse as a deck" | opens a chart (`house_areas`) |
 | "the deck is out for review, next is to tighten the ask" | charts it (`house_note`) |
 | "rounds" / "status?" | one line per area, staleness marked (`house_rounds`) |
-| "what's next for roboteur?" | visits the chart, diagnoses, sets `next`, prescribes (`house_prescribe`) |
-| "send that to roboteur" | delivers the latest prescription to its `bind` (`house_send`) |
+| "what's next for atlas?" | visits the chart, diagnoses, sets `next`, prescribes (`house_prescribe`) |
+| "send that to atlas" | delivers the latest prescription to its `bind` (`house_send`) |
 
 ## What House will not do
 

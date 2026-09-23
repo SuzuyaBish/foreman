@@ -33,18 +33,18 @@ test_empty() {
 }
 
 test_marks_no_next_and_stale() {
-  "$AREA" add roboteur --kind repo >/dev/null
-  "$NEXT" roboteur "add --dry-run and a test" >/dev/null
-  "$AREA" add nedbank-app --kind chat >/dev/null
-  "$NEXT" nedbank-app "wire the accounts tab" >/dev/null
+  "$AREA" add atlas --kind repo >/dev/null
+  "$NEXT" atlas "add --dry-run and a test" >/dev/null
+  "$AREA" add harbour-app --kind chat >/dev/null
+  "$NEXT" harbour-app "wire the accounts tab" >/dev/null
   "$AREA" add expo-talk --kind deck >/dev/null
   "$NEXT" expo-talk "outline the ten minutes" >/dev/null
-  backdate roboteur "$(old_date 30)"
+  backdate atlas "$(old_date 30)"
 
   local out
   out=$("$ROUNDS")
   assert_contains "$out" "house rounds: 3 areas (1 stale, 0 no next)" "the header counts stale and no-next"
-  assert_contains "$out" "roboteur" "the stale area is listed"
+  assert_contains "$out" "atlas" "the stale area is listed"
   assert_contains "$out" "[stale" "a stale updated is marked"
   assert_contains "$out" "add --dry-run and a test" "the status/next line carries the step"
   assert_not_contains "$out" "[no next]" "an area with a next is not marked"

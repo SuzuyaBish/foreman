@@ -45,8 +45,8 @@ permission to write a note; charting is the job.
 
 ## New areas
 
-When the captain names a new thread ("track the investor pitch as a deck", "the
-four Nedbank chats are areas"), open a chart with `house_areas action=add`. Pick
+When the captain names a new thread ("track the lighthouse as a deck", "the
+four Harbour chats are areas"), open a chart with `house_areas action=add`. Pick
 a short kebab-case slug that names the work. Ask only for what you cannot infer:
 the `kind` (`repo`, `chat`, `deck`, `craft`, `other`), the `where` (path, url,
 chat or pane), and the `bind` if there is a live session to reach later. A repo

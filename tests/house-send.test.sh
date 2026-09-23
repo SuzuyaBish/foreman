@@ -53,21 +53,21 @@ test_refuses_without_a_prescription() {
 test_dry_run_then_send() {
   fm_task t1 working >/dev/null
   fm_attach_pane t1 >/dev/null
-  "$AREA" add roboteur --title "Roboteur" --kind repo --bind t1 >/dev/null
-  "$NEXT" roboteur "add --dry-run and a test" >/dev/null
-  "$PRESCRIBE" roboteur >/dev/null 2>&1
+  "$AREA" add atlas --title "Atlas" --kind repo --bind t1 >/dev/null
+  "$NEXT" atlas "add --dry-run and a test" >/dev/null
+  "$PRESCRIBE" atlas >/dev/null 2>&1
 
   local out
-  out=$("$SEND" roboteur 2>"$ERRF")
+  out=$("$SEND" atlas 2>"$ERRF")
   assert_contains "$out" "dry run" "the default is a dry run"
   assert_contains "$out" "to: crew t1" "the dry run names the target"
-  assert_contains "$out" "House prescription - Roboteur" "the dry run shows exactly what would go"
+  assert_contains "$out" "House prescription - Atlas" "the dry run shows exactly what would go"
   assert_absent "$FOREMAN_HOME/tasks/t1/inbox/001.msg" "the dry run records nothing"
 
-  out=$("$SEND" roboteur --yes 2>"$ERRF")
-  assert_contains "$out" "sent roboteur to crew t1" "the send is reported"
+  out=$("$SEND" atlas --yes 2>"$ERRF")
+  assert_contains "$out" "sent atlas to crew t1" "the send is reported"
   assert_present "$FOREMAN_HOME/tasks/t1/inbox/001.msg" "the delivery is a durable record"
-  assert_contains "$(cat "$FOREMAN_HOME/tasks/t1/inbox/001.msg")" "House prescription - Roboteur" "the record carries the prescription"
+  assert_contains "$(cat "$FOREMAN_HOME/tasks/t1/inbox/001.msg")" "House prescription - Atlas" "the record carries the prescription"
   pass "a dry run sends nothing, and --yes delivers the durable record"
 }
 
@@ -83,10 +83,10 @@ test_bind_accepts_a_crew_prefix() {
 }
 
 test_warns_when_the_chart_moved_on() {
-  "$PRESCRIBE" roboteur >/dev/null 2>&1
+  "$PRESCRIBE" atlas >/dev/null 2>&1
   sleep 1
-  "$NOTE" roboteur "the next step moved" >/dev/null
-  "$SEND" roboteur >/dev/null 2>"$ERRF"
+  "$NOTE" atlas "the next step moved" >/dev/null
+  "$SEND" atlas >/dev/null 2>"$ERRF"
   assert_contains "$(cat "$ERRF")" "changed since the prescription" "a stale prescription is flagged"
   pass "a prescription that predates the chart is flagged, not hidden"
 }

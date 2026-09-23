@@ -397,8 +397,8 @@ prescribes and, only when you say so, sends a prompt to a session already
 working there.
 
 An area is **not** a git project and **not** a crew task. It is any ongoing
-thread you keep in your head: *the four Nedbank chats*, *the investor pitch*,
-*roboteur*. You name them; their truth lives in House's chart under
+thread you keep in your head: *the four Harbour chats*, *the Lighthouse deck*,
+*Atlas*. You name them; their truth lives in House's chart under
 `$FOREMAN_HOME/house/areas/<slug>.md` — plain text, greppable, yours to edit —
 not in git. This is the difference that matters: the crew machinery owns tasks
 that finish, House owns threads that stay open.
@@ -418,12 +418,12 @@ frames the work; [HOUSE.md](HOUSE.md) is who House is.
 ### The loop
 
 ```
-> track the investor pitch as a deck
+> track the lighthouse as a deck
 > the deck is out for review, next is to tighten the ask
 > rounds
 
-  roboteur        repo   2d   status: parser merged, flags half done  next: add --dry-run
-  investor-pitch  deck   1d   status: out for review                  next: tighten the ask
+  atlas           repo   2d   status: parser merged, flags half done  next: add --dry-run
+  lighthouse      deck   1d   status: out for review                  next: tighten the ask
   expo-talk       deck   9d   status: slides started                  next: -  [no next]
 
 > what's next for expo-talk?
@@ -452,11 +452,11 @@ wrappers over them. Every command takes `--help`.
 A chart is a few `key: value` header lines and an append-only dated log:
 
 ```
-  slug: roboteur
-  title: Roboteur
+  slug: atlas
+  title: Atlas
   kind: repo
-  where: ~/code/roboteur
-  bind: roboteur-crew
+  where: ~/code/atlas
+  bind: atlas-crew
   opened: 2026-06-01
   updated: 2026-06-03
   status: parser merged; CLI flags half done
