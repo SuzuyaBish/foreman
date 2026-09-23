@@ -151,6 +151,36 @@ test_concurrent_notes_do_not_lose_appends() {
   pass "concurrent notes cannot lose each other's log line"
 }
 
+test_note_creates_the_log_header() {
+  mkdir -p "$AREAS"
+  {
+    printf 'slug: hand\nkind: repo\nupdated: 2020-01-01\nstatus: ok\nnext: x\n\n'
+    printf -- '- 2020-01-01 - an existing log line\n'
+  } >"$AREAS/hand.md"
+  "$NOTE" hand 'a new note' >/dev/null
+  local content first new
+  content=$(cat "$AREAS/hand.md")
+  assert_contains "$content" "## Log" "a chart without a log header gets one"
+  assert_contains "$content" "- 2020-01-01 - an existing log line" "the existing log line survives"
+  assert_contains "$content" "a new note" "the new note is logged"
+  first=$(printf '%s\n' "$content" | grep -n 'an existing log line' | cut -d: -f1)
+  new=$(printf '%s\n' "$content" | grep -n 'a new note' | cut -d: -f1)
+  [ -n "$first" ] && [ -n "$new" ] && [ "$new" -gt "$first" ] || fail "the new note must follow the existing log line"
+  rm -f "$AREAS/hand.md"
+  pass "a chart with no ## Log gets a header before its log, not a field after it"
+}
+
+test_note_appends_a_log_to_a_headerless_chart() {
+  printf 'slug: bare\nkind: repo\nupdated: 2020-01-01\nstatus: ok\nnext: x\n' >"$AREAS/bare.md"
+  "$NOTE" bare 'first note' >/dev/null
+  local content
+  content=$(cat "$AREAS/bare.md")
+  assert_contains "$content" "## Log" "the log header is created"
+  assert_contains "$content" "- $(date +%Y-%m-%d) - first note" "the note is logged"
+  rm -f "$AREAS/bare.md"
+  pass "a headerless chart gets a log rather than a stray field after the log lines"
+}
+
 test_archive_retires_but_keeps() {
   local out
   out=$("$AREA" archive atlas)
@@ -175,5 +205,7 @@ test_backslash_is_literal
 test_newline_cannot_inject_a_field
 test_a_rejected_note_writes_nothing
 test_duplicate_fields_heal_on_write
+test_note_creates_the_log_header
+test_note_appends_a_log_to_a_headerless_chart
 test_concurrent_notes_do_not_lose_appends
 test_archive_retires_but_keeps
