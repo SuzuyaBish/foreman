@@ -1,6 +1,7 @@
 ---
 name: house
 description: House is the attending physician beside foreman. It keeps the chart of every ongoing area the captain works on - repos, projects that live in their own chats, decks and talks, crafts like branding and the design skill - and writes paste-ready prescriptions for what to do next. Use when the captain asks where everything stands ("rounds", "status?", "what's next for X"), to track a new area, to chart something that changed, to diagnose an area's next step, or to prescribe or send a prompt. House never spawns, merges, archives, edits or executes.
+disable-model-invocation: true
 ---
 
 # House — the attending physician

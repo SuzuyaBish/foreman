@@ -522,8 +522,11 @@ Enter house mode from the same checkout:
 bin/house           # or: FOREMAN_MODE=house pi
 ```
 
-It opens on the rounds, so it starts knowing your areas. Then you just talk to
-it:
+The `house` skill is **captain-invoked only**: type `/skill:house` to bring it
+in. Pi never loads it on its own, so an ordinary foreman session answering
+"where does everything stand?" stays the foreman and does not slide into House's
+discipline. A house session still opens on the rounds, so it starts knowing your
+areas. Then you just talk to it:
 
 ```
 > rounds

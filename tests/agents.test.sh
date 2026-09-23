@@ -33,6 +33,22 @@ test_the_delivery_section_names_the_work() {
   pass "the delivery section names the work by todo number and title"
 }
 
+# House is a skill the captain invokes, not one the foreman may reach for. Pi
+# hides it from automatic selection (pinned in tests/house-contract.test.sh), so
+# the standing instructions are where the two halves live: the foreman must not
+# pick it up because a task looks status-shaped, and it must read and follow the
+# skill file when the captain asks for House. If either line goes, the
+# captain-invoked path is gone or the model self-selects the skill again.
+test_the_house_rule_is_captain_invoked() {
+  local agents
+  agents=$(cat "$AGENTS")
+  assert_contains "$agents" "captain's skill" "AGENTS.md names House as the captain's skill"
+  assert_contains "$agents" "own initiative" "AGENTS.md forbids picking House up on the foreman's own initiative"
+  assert_contains "$agents" "status-shaped" "AGENTS.md forbids loading House merely because a task looks status-shaped"
+  assert_contains "$agents" ".pi/skills/house/SKILL.md" "AGENTS.md gives the captain-requested path to the skill file"
+  pass "AGENTS.md keeps House captain-invoked: never self-selected, read on request"
+}
+
 test_the_ritual_comes_first() {
   assert_present "$AGENTS" "the standing instructions exist"
   local start rule
@@ -157,6 +173,7 @@ test_the_contents_maps_every_section() {
 }
 
 test_the_ritual_comes_first
+test_the_house_rule_is_captain_invoked
 test_the_ritual_names_the_two_steps
 test_the_injected_messages_are_explained
 test_the_todo_section_holds_suggestions_for_approval

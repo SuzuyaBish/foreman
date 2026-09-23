@@ -5,7 +5,8 @@
 # discipline. `bin/foreman` runs the crew; `bin/house` takes the chart and
 # writes prescriptions and never spawns, merges, archives or executes. The
 # marker is exported so the extension knows to open the session with the
-# rounds, and so the house skill is the one that frames the work.
+# rounds; the house skill itself is captain-invoked (`/skill:house`), never
+# auto-loaded, so a plain foreman session cannot be pulled into it.
 set -eu
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
