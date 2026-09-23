@@ -129,6 +129,15 @@ if [ "$MERGED" = 1 ]; then
   fi
   foreman_event_append "$ID" done "" "merged by the foreman: $PR"
   foreman_status_sync "$ID"
+  # The merge is the moment the work is done, so the linked todo item must stop
+  # reading `active` now -- not whenever something happens to run a list. The
+  # chrome reads todo.tsv directly and cannot fork a shell to reconcile it, and
+  # `active` with a settled crew is the one row shape that reads as action owed
+  # by the captain. `crew-todo.sh sync` is the same idempotent rule archive runs;
+  # no hand-written settling here. It runs after the status is written (the sync
+  # derives from it) and its failure never touches this command's exit: the merge
+  # already happened and stands on its own.
+  "$FOREMAN_ROOT/bin/crew-todo.sh" sync >/dev/null 2>&1 || true
   printf 'merged %s (%s); %s\n' "$PR" "$METHOD" "$close_note"
   exit 0
 fi

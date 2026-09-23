@@ -34,6 +34,9 @@ wait_for_exit() {
 # earlier test has already advanced.
 add_item() { "$BIN/crew-todo.sh" add "$@" | sed -n 's/^added #\([0-9][0-9]*\).*/\1/p'; }
 
+# item_status <seq>: the linked item's status, read straight from the board file.
+item_status() { awk -F'\t' -v s="$1" '$1 == s { print $2 }' "$FOREMAN_HOME/todo.tsv"; }
+
 # attach_home <id>: record the workspace and tab this foreman created for a crew,
 # with its pane registered there, exactly as a launch leaves it. Prints the pane.
 attach_home() { # <id>
@@ -383,7 +386,51 @@ test_an_unreachable_herdr_warns_and_changes_nothing() {
   pass "an unreachable Herdr leaves the finish standing"
 }
 
+# test_a_state_change_settles_the_linked_item: the general case. A merge is not
+# the only way a crew's state changes: a crew that reports `done` for a report
+# task, or goes `failed` before delivering, leaves the same stale row, and the
+# chrome cannot reconcile it. The watcher observes those transitions, so it
+# settles the derived row there.
+test_a_state_change_settles_the_linked_item() {
+  local seq_done seq_fail pid
+  fm_task wd working >/dev/null
+  seq_done=$(add_item "delivered by a report, not a merge")
+  "$BIN/crew-todo.sh" start "$seq_done" wd >/dev/null
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" wd done "report delivered" >/dev/null
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake when a linked crew reported done"
+  }
+  wait "$pid"
+  assert_equals "done" "$(item_status "$seq_done")" \
+    "a crew that reports done settles its linked item without a list call"
+
+  fm_task wf working >/dev/null
+  seq_fail=$(add_item "its crew died before delivering")
+  "$BIN/crew-todo.sh" start "$seq_fail" wf >/dev/null
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" wf failed "cannot be completed" >/dev/null
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake when a linked crew failed"
+  }
+  wait "$pid"
+  assert_equals "open" "$(item_status "$seq_fail")" \
+    "a crew that fails before delivering reopens its linked item"
+  pass "the watcher settles a linked item wherever its crew's state changes"
+}
+
 test_an_unreachable_herdr_warns_and_changes_nothing
+test_a_state_change_settles_the_linked_item
 test_a_finished_crew_releases_its_home_once
 test_a_failed_crew_releases_its_home
 test_a_blocked_crew_keeps_its_home

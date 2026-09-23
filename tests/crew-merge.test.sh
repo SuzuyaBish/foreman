@@ -21,6 +21,17 @@ TRANSIENT_REASON='GraphQL: Base branch was modified. Review and try the merge ag
 CONFLICT_REASON='X Pull request is not mergeable: the base branch has conflicts'
 state_of() { sed -n 's/^state=//p' "$FOREMAN_HOME/tasks/$1/status"; }
 note_of() { sed -n 's/^note=//p' "$FOREMAN_HOME/tasks/$1/status"; }
+# item_status <seq>: the linked todo item's status, read from the board file.
+item_status() { awk -F'\t' -v s="$1" '$1 == s { print $2 }' "$FOREMAN_HOME/todo.tsv"; }
+
+# link_item <crew-id> <text>: put an item on the board and link it to the crew,
+# exactly as the foreman's `crew_todo start` does. Prints the item number.
+link_item() {
+  local id=$1 seq
+  seq=$("$BIN/crew-todo.sh" add "$2" | sed -n 's/^added #\([0-9][0-9]*\).*/\1/p')
+  "$BIN/crew-todo.sh" start "$seq" "$id" >/dev/null
+  printf '%s\n' "$seq"
+}
 
 # inbox_text <id>: every durable inbox record, concatenated.
 inbox_text() {
@@ -165,6 +176,39 @@ test_merge_settles_the_task() {
   assert_contains "$(note_of m3)" "merged by the foreman: 42" "the settlement names the merge"
   assert_contains "$(fm_gh_calls)" "pr merge 42 --squash" "gh was asked for a squash merge"
   pass "a merge settles the task and uses the requested method"
+}
+
+# The bug: a linked item kept reading `active` after its crew's pull request
+# merged, so the captain's board showed an `active`/no-active-crew row -- the one
+# shape that means action is owed. The merge is the moment the work is done, so
+# the item has to settle before the command returns.
+test_a_successful_merge_settles_the_linked_item() {
+  local seq
+  review_task msettle 70
+  seq=$(link_item msettle "the work this merge completes")
+  assert_equals "active" "$(item_status "$seq")" "a linked item is active while its crew is in review"
+
+  "$MERGE" msettle >/dev/null
+  assert_equals "done" "$(item_status "$seq")" "the merge settles the linked item in the same command"
+  pass "a successful merge settles its linked todo item to done"
+}
+
+# A refusal is not a merge. The item must stay exactly as it was -- `active`,
+# with its crew in review (or blocked) and its work untouched -- so no refusal
+# path may run the settling rule.
+test_a_refused_merge_leaves_the_linked_item_active() {
+  local seq
+  review_task mreject 71
+  seq=$(link_item mreject "the work this refused merge did not land")
+  printf '1\n' >"$GH_STUB_STATE/merge-exit"
+  printf 'HTTP 403: Resource not accessible by integration (mergePullRequest)\n' \
+    >"$GH_STUB_STATE/merge-reason"
+  fm_gh_pr_state OPEN
+  if "$MERGE" mreject >/dev/null 2>&1; then fail "a refused merge reported success"; fi
+  assert_equals "active" "$(item_status "$seq")" "a refused merge never settles the item"
+  assert_equals "blocked" "$(state_of mreject)" "the refusal blocks the crew, as before"
+  rm -f "$GH_STUB_STATE/merge-exit" "$GH_STUB_STATE/merge-reason" "$GH_STUB_STATE/pr.json"
+  pass "a refused merge leaves the linked item untouched and active"
 }
 
 test_a_successful_merge_closes_the_crews_home() {
@@ -437,6 +481,8 @@ test_missing_gh_is_refused() {
 
 test_merge_requires_review
 test_merge_settles_the_task
+test_a_successful_merge_settles_the_linked_item
+test_a_refused_merge_leaves_the_linked_item_active
 test_a_successful_merge_closes_the_crews_home
 test_a_blocked_merge_keeps_the_crews_home
 test_an_unreachable_herdr_never_undermines_the_merge
