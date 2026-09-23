@@ -21,6 +21,14 @@ test_staleness_is_documented_as_last_write() {
   pass "staleness is documented as last-write, not last-verified"
 }
 
+test_the_house_skill_is_captain_invoked() {
+  local skill="$ROOT/.pi/skills/house/SKILL.md"
+  assert_present "$skill" "the house skill exists"
+  assert_grep "disable-model-invocation: true" "$skill" \
+    "the house skill refuses automatic model invocation"
+  pass "the house skill is captain-invoked only"
+}
+
 test_the_table_is_there() {
   local rows
   rows=$(grep -E '^\| `bin/house-[a-z-]+\.sh` \|' "$README" || true)
@@ -86,4 +94,5 @@ test_every_documented_script_exists_and_documents_its_verbs
 test_every_house_script_is_documented
 test_every_documented_tool_is_registered
 test_house_mode_is_wired
+test_the_house_skill_is_captain_invoked
 test_staleness_is_documented_as_last_write

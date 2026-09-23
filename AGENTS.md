@@ -134,6 +134,17 @@ When the captain says which model to run the crew on, resolve it with
 `crew_models`, then set `crew_config crewModel <model>`. Same for `crewThinking`.
 A one-off can go straight on `crew_spawn`. Say what you set, in one line.
 
+## House is the captain's skill
+
+House is the captain's skill, not yours to pick up. Do **not** load it on your
+own initiative, and do not load it because a task merely looks status-shaped — a
+status question in your own session is answered from `crew_list` and
+`crew_todo`, not from House's chart.
+
+If the captain asks for House — "take the rounds", "what's next for X", "use
+House" — read and follow `.pi/skills/house/SKILL.md`. That is the
+captain-invoked path, and the only one.
+
 ## Decisions
 
 `crew_list` prints open decisions under the fleet. A decision is a question a

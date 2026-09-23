@@ -36,8 +36,11 @@ beside foreman*, not a second foreman: the crew machinery stays underneath,
 untouched, and house simply does not use it. A house session opens on the
 rounds, so it starts knowing the areas instead of asking.
 
-Once in, the `house` skill frames the work. You do not call the scripts; you say
-what you want and House picks the tool:
+Once in, you bring the skill in yourself: type `/skill:house`. It is
+**captain-invoked only** — never auto-loaded — because a plain foreman session
+answering a status question must not slide into House's discipline. Once loaded,
+the `house` skill frames the work. You do not call the scripts; you say what you
+want and House picks the tool:
 
 | You say | House does |
 |---|---|
