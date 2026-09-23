@@ -136,15 +136,17 @@ test_a_clean_crew_is_silent() {
   pass "a crew that left nothing running reads as clean"
 }
 
-# The probe runs from inside the crew's directory, so its own children inherit
-# the anchor as their cwd. `lsof` duly lists itself, and the run that is looking
-# for strays must not report one - this exact false positive refused a real
-# crew's `done` report in the live E2E before it was fixed.
+# The probe runs from inside the crew's directory, so the probe itself and the
+# shells that invoked it have the anchor as their cwd. `lsof` duly lists them,
+# and the run that is looking for strays must not report one - this exact false
+# positive refused a real crew's `done` report in the live E2E before it was
+# fixed.
 test_the_probe_never_reports_itself() {
-  local root dir out
+  local root dir real out status i
   root=$(fm_tmproot procs-self)
   dir="$root/proj"
   mkdir -p "$dir"
+  real=$(cd "$dir" && pwd -P)
   fm_task self-crew working >/dev/null
   fm_task_field self-crew cwd "$dir"
 
@@ -152,10 +154,30 @@ test_the_probe_never_reports_itself() {
   assert_equals "" "$out" "the probe does not report its own scan"
   assert_equals "0" "$(cd "$dir" && "$PROC" count self-crew)" "and counts nothing"
 
+  # The same scan with no agent above the probe. `( ... & )` reparents the
+  # runner to PID 1 before the probe reads the process table, so there is no
+  # `pi` seed for it to hide behind and it has to exclude its own process tree
+  # by name. A crew's tool shell is orphaned exactly this way, and the old
+  # probe reported itself as a stray whenever that happened.
+  out="$root/out"
+  status="$root/status"
+  ( cd "$dir" && {
+      "$PROC" list self-crew >"$out" 2>&1
+      printf '%s' "$?" >"$status"
+    } & ) 2>/dev/null
+  i=0
+  while [ ! -f "$status" ] && [ "$i" -lt 200 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  assert_present "$status" "a detached probe finishes"
+  assert_equals "0" "$(cat "$status")" "a detached probe answers"
+  assert_equals "" "$(cat "$out")" "a detached probe does not report itself either"
+
   # A pid in the cwd scan that the process table cannot name is never blamed
   # either: it would be the scan itself, or something that already exited.
   printf '  100      1 pi\n' >"$root/ps"
-  printf 'p999\nclsof\nfcwd\nn%s\n' "$dir" >"$root/lsof"
+  printf 'p999\nclsof\nfcwd\nn%s\n' "$real" >"$root/lsof"
   out=$(FOREMAN_PROC_PS_FILE="$root/ps" FOREMAN_PROC_LSOF_FILE="$root/lsof" "$PROC" list self-crew)
   assert_equals "" "$out" "an unnamed process is not blamed on the crew"
   pass "the probe never reports itself or anything it cannot name"
