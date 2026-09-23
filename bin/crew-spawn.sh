@@ -30,6 +30,7 @@ DELIVERY=
 MODEL=
 THINKING=
 BASE=HEAD
+EXPLICIT_BASE=0
 PARTS=()
 seen_target=0
 while [ $# -gt 0 ]; do
@@ -47,7 +48,10 @@ while [ $# -gt 0 ]; do
       ;;
     --model) MODEL=$2 ;;
     --thinking) THINKING=$2 ;;
-    --base) BASE=$2 ;;
+    --base)
+      BASE=$2
+      EXPLICIT_BASE=1
+      ;;
     --delivery) DELIVERY=$2 ;;
     esac
     shift 2
@@ -112,7 +116,11 @@ WT=
 PROJ=
 if [ "$ISOLATE" = 1 ]; then
   PROJ=$(foreman_project_path "$PROJECT")
-  WT=$("$FOREMAN_ROOT/bin/crew-worktree.sh" add "$PROJECT" "$ID" --base "$BASE") ||
+  # Only forward --base when the caller chose one: a default HEAD must stay the
+  # default, so the worktree script can still see it as the un-chosen base.
+  WT_ARGS=(add "$PROJECT" "$ID")
+  [ "$EXPLICIT_BASE" = 0 ] || WT_ARGS+=(--base "$BASE")
+  WT=$("$FOREMAN_ROOT/bin/crew-worktree.sh" "${WT_ARGS[@]}") ||
     foreman_die "could not create an isolated worktree for '$ID' in project '$PROJECT'"
   CWD=$WT
 elif [ -z "$CWD" ] && [ -n "$PROJECT" ]; then

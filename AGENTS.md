@@ -108,6 +108,9 @@ project plan:
 - If a spawn warns that the project checkout has uncommitted work, pass that on
   to the captain in one line: the crew's worktree was cut from `HEAD` and does
   not have it.
+- **Sync the project checkout before spawning**, in its own completed step:
+  `git fetch` and a fast-forward. Never batch that sync with the spawn — the two
+  race, and a crew cut from a stale `HEAD` silently starts behind.
 - If you change anything under `bin/`, run `bin/crew-test.sh` and make it pass.
   It drives the real scripts in an isolated home with a fake Herdr, so it is
   safe to run and it is the only regression check this repo has.
