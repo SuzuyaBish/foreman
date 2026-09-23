@@ -117,6 +117,21 @@ test_the_work_section_defaults_to_parallel_crews() {
   pass "the Work section defaults to concurrent crews and sequences shared-file work"
 }
 
+# A crew's worktree is cut from the project checkout's HEAD, so a checkout that
+# has not been synced before the spawn hands the crew an older base silently. The
+# sync has to be its own completed step - batched with the spawn it races, and
+# the crew is cut from whatever HEAD was. Pin each part so the rule cannot be
+# softened to a general "keep things current" and lose its teeth.
+test_the_work_section_syncs_before_spawning() {
+  local work
+  work=$(sed -n '/^## Work$/,/^## /p' "$AGENTS")
+  assert_contains "$work" "its own completed step" "the sync is a completed step of its own"
+  assert_contains "$work" "Never batch" "the sync is never batched with the spawn"
+  assert_contains "$work" "race" "the section says why batching the two fails"
+  assert_contains "$work" "stale" "the section names the stale base a crew would start from"
+  pass "the Work section syncs the checkout in its own step before spawning"
+}
+
 # The contents list is the reader's map, so it has to be the map: every entry in
 # it resolves to a section, and every section is reachable from it. Written by
 # hand it drifted immediately - "How a crew member appears" was missing, and the
@@ -137,5 +152,6 @@ test_the_ritual_names_the_two_steps
 test_the_injected_messages_are_explained
 test_the_todo_section_holds_suggestions_for_approval
 test_the_work_section_defaults_to_parallel_crews
+test_the_work_section_syncs_before_spawning
 test_the_delivery_section_names_the_work
 test_the_contents_maps_every_section

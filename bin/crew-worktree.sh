@@ -27,17 +27,40 @@ worktree_warn_source_dirty() { # <project> <base>
     "$proj" "$note" "$base" >&2
 }
 
+# The base a worktree is cut from is the project checkout's HEAD by default, and
+# a checkout that is behind its upstream hands the crew an older commit without
+# saying so. Refusing would break a checkout that is deliberately behind, so this
+# warns; a base chosen with --base opts out, because the caller picked it on
+# purpose. No upstream (no remote, no tracking branch, detached HEAD) is silent.
+worktree_warn_source_stale() { # <project> <explicit-base-0-or-1>
+  local proj=$1 upstream behind subjects
+  [ "${2:-0}" = 0 ] || return 0
+  upstream=$(git -C "$proj" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || return 0
+  [ -n "$upstream" ] || return 0
+  behind=$(git -C "$proj" rev-list --count "HEAD..$upstream" 2>/dev/null) || return 0
+  case "$behind" in '' | *[!0-9]*) return 0 ;; esac
+  [ "$behind" -gt 0 ] || return 0
+  subjects=$(git -C "$proj" log --format=%s "HEAD..$upstream" 2>/dev/null | head -3 |
+    awk 'NR > 1 { printf ", " } { printf "%s", $0 }')
+  [ "$behind" -le 3 ] || subjects="$subjects, ..."
+  printf 'warning: base HEAD in %s is %s commits behind %s: %s\n' \
+    "$proj" "$behind" "$upstream" "$subjects" >&2
+  printf 'warning: the crew would start from an older base; sync the checkout before spawning\n' >&2
+}
+
 ACTION=${1:-}
 case "$ACTION" in
 add)
   NAME=${2:-}
   ID=${3:-}
   BASE=HEAD
+  EXPLICIT_BASE=0
   shift 3 || foreman_die "usage: crew-worktree.sh add <project> <task-id> [--base <ref>]"
   while [ $# -gt 0 ]; do
     case "$1" in
     --base)
       BASE=${2:-}
+      EXPLICIT_BASE=1
       shift 2
       ;;
     *) foreman_die "unknown option: $1" ;;
@@ -57,6 +80,8 @@ add)
   if git -C "$PROJ" show-ref --verify --quiet "refs/heads/$BRANCH"; then
     foreman_die "branch $BRANCH already exists in $PROJ; pick another task id or delete the branch"
   fi
+
+  worktree_warn_source_stale "$PROJ" "$EXPLICIT_BASE"
 
   mkdir -p "$FOREMAN_WORKTREES"
   git -C "$PROJ" worktree add -b "$BRANCH" "$WT" "$BASE" >/dev/null 2>&1 ||

@@ -677,3 +677,29 @@ fm_git_repo() {
   git -C "$dir" remote add origin "https://example.test/o/r.git"
   printf '%s\n' "$dir"
 }
+
+# fm_git_behind <dir> <subject>...: a repository whose checked-out branch tracks
+# an origin and is one commit behind it per subject, oldest first. The remote is
+# never contacted: the remote-tracking ref is set directly, so the fixture is
+# hermetic like the rest. The checkout's own HEAD stays put, which is exactly the
+# stale-base shape a worktree is cut from.
+fm_git_behind() {
+  local dir=$1
+  shift
+  local branch tip subject
+  fm_git_repo "$dir" --origin >/dev/null
+  branch=$(git -C "$dir" symbolic-ref --short HEAD)
+  git -C "$dir" config "branch.$branch.remote" origin
+  git -C "$dir" config "branch.$branch.merge" "refs/heads/$branch"
+  git -C "$dir" checkout -q -b fm-upstream
+  for subject in "$@"; do
+    printf '%s\n' "$subject" >>"$dir/fm-upstream.txt"
+    git -C "$dir" add fm-upstream.txt
+    git -C "$dir" -c user.name=foreman-test -c user.email=foreman-test@example.test \
+      commit -qm "$subject"
+  done
+  tip=$(git -C "$dir" rev-parse HEAD)
+  git -C "$dir" checkout -q "$branch"
+  git -C "$dir" update-ref "refs/remotes/origin/$branch" "$tip"
+  git -C "$dir" branch -qD fm-upstream
+}

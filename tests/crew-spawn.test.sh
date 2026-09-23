@@ -182,6 +182,20 @@ test_spawn_surfaces_uncommitted_checkout_work() {
   pass "an isolated spawn tells the foreman what the worktree will not carry"
 }
 
+test_spawn_surfaces_a_stale_base() {
+  local proj out
+  proj="$FOREMAN_PROJECTS/staleproj"
+  fm_git_behind "$proj" "landed while we looked" >/dev/null
+  fm_gh_stub >/dev/null
+
+  out=$("$SPAWN" stale-base --project staleproj "isolated task" 2>&1)
+  assert_contains "$out" "behind" "spawn surfaces the stale-base warning"
+  assert_contains "$out" "landed while we looked" "the warning names the missing commit"
+  assert_contains "$out" "sync the checkout before spawning" "the warning says what to do"
+  assert_contains "$out" "launched stale-base" "the spawn still goes ahead"
+  pass "an isolated spawn from a stale base tells the foreman"
+}
+
 test_workspace_resolution() {
   local dir ws
   dir=$(fm_tmproot workspace)
@@ -214,4 +228,5 @@ test_project_without_isolation
 test_arguments_are_validated
 test_double_dash_and_model_options
 test_spawn_surfaces_uncommitted_checkout_work
+test_spawn_surfaces_a_stale_base
 test_workspace_resolution
