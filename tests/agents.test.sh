@@ -58,6 +58,26 @@ test_the_injected_messages_are_explained() {
   pass "the injected session-start messages are accounted for"
 }
 
+# The Work section is where a session is told what to do with a request, so the
+# parallelism default has to live there and has to stay there. A piece that can
+# run on its own gets its own crew, in its own worktree, at the same time as the
+# others; the exception is pieces that must touch one file, which are sequenced
+# because two crews editing one file cannot merge. Each of those ideas is one
+# edit away from vanishing, so they are pinned as content, not as prose.
+test_the_work_section_defaults_to_parallel_crews() {
+  local work
+  work=$(sed -n '/^## Work$/,/^## /p' "$AGENTS")
+  assert_contains "$work" "parallel" "the Work section states the parallelism default"
+  assert_contains "$work" "same files" "the Work section names the shared-file exception"
+  assert_contains "$work" "sequence" "the shared-file exception sequences pieces instead of running them at once"
+  # The section points at the regression suite, and the rationale for the rule
+  # is in DESIGN.md; a pointer that dangles is worse than none, so both must
+  # exist.
+  assert_present "$ROOT/bin/crew-test.sh" "the regression suite the Work section points at exists"
+  assert_present "$ROOT/DESIGN.md" "the design rationale the Work section points at exists"
+  pass "the Work section defaults to concurrent crews and sequences shared-file work"
+}
+
 # The contents list is the reader's map, so it has to be the map: every entry in
 # it resolves to a section, and every section is reachable from it. Written by
 # hand it drifted immediately - "How a crew member appears" was missing, and the
@@ -76,4 +96,5 @@ test_the_contents_maps_every_section() {
 test_the_ritual_comes_first
 test_the_ritual_names_the_two_steps
 test_the_injected_messages_are_explained
+test_the_work_section_defaults_to_parallel_crews
 test_the_contents_maps_every_section

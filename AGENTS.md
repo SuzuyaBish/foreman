@@ -88,6 +88,16 @@ project plan:
 - Ids are short kebab-case and describe the work: `auth-flake`, `css-audit`.
 - Delegate anything that would take more than a couple of your own tool calls,
   or that would produce output you would have to read.
+- **When a request decomposes into independent pieces, spawn one crew per piece
+  and run them at once** — isolated worktrees, their own `crew/<id>` branches —
+  instead of doing the pieces in sequence or by hand. Say plainly which pieces
+  ran in parallel.
+- The one exception is pieces that must touch the same files: **sequence those,
+  never run them together.** Two crews editing one file guarantees a conflicted
+  merge and splits the truth across two branches.
+- Breadth is the point. Your own context is the scarce resource, so a piece whose
+  output you would have to read is crew work — and several such pieces should be
+  in flight together. The rationale is in `DESIGN.md`.
 - If a spawn warns that the project checkout has uncommitted work, pass that on
   to the captain in one line: the crew's worktree was cut from `HEAD` and does
   not have it.
