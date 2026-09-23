@@ -394,19 +394,52 @@ starts a private `lavish-axi` server and runs the round trip.
 
 ## House
 
-The physician beside the foreman. Foreman runs the crew; **House keeps the
-chart and writes prescriptions.** It knows every *area* you work on — a repo, a
-project that lives in its own chat, a deck or talk, a craft like branding or the
-design skill — and it does nothing to any of them. It examines, diagnoses,
-prescribes and, only when you say so, sends a prompt to a session already
-working there.
+House is a notebook of everything you are working on, kept by an assistant that
+only ever writes prompts — it never does the work itself. (The physician beside
+the foreman: it keeps the chart and writes the prescription; the crew operates.)
 
-An area is **not** a git project and **not** a crew task. It is any ongoing
-thread you keep in your head: *the four Harbour chats*, *the Lighthouse deck*,
-*Atlas*. You name them; their truth lives in House's chart under
-`$FOREMAN_HOME/house/areas/<slug>.md` — plain text, greppable, yours to edit —
-not in git. This is the difference that matters: the crew machinery owns tasks
-that finish, House owns threads that stay open.
+### What an area is
+
+An area is any ongoing thread you keep in your head: a repo, a project that lives
+in its own chat, a deck or a talk, a craft like branding. It is **not** a git
+project and **not** a crew task — those start and finish, while an area is a
+thread that stays open. You name your areas; house remembers them. Each one is
+written to a plain text file you can open and edit yourself,
+`$FOREMAN_HOME/house/areas/<slug>.md`.
+
+### The two lines you keep current
+
+Two lines on each area are the ones that matter:
+
+- `status` — where it stands, in one line.
+- `next` — what happens next, in one line.
+
+Everything else in the file is a dated log of what changed. Keeping those two
+lines honest is the whole job of the chart.
+
+### The loop, step by step
+
+House only ever does four things, and never any of them on its own:
+
+- **Rounds** — read every area and show one line each. Anything with no next
+  step, or not touched in a while, is flagged.
+- **Diagnose** — for one area, work out the next step and write it down.
+- **Prescribe** — turn the chart into a *prescription*: a short prompt you can
+  paste straight into a fresh chat to do that next step.
+- **Send** — if the area names a session to reach, hand the prescription there.
+  Only when you say so.
+
+Nothing is automatic. House never scans your machine and never notices a change
+by itself. If a `status` or `next` changed, somebody wrote it: you, by saying it,
+or the foreman, by charting what happened.
+
+### What house will not do
+
+House never spawns, merges, archives, edits or runs anything, in any area. It
+writes prompts and hands them over; the session you paste them into does the
+work.
+
+### Using house day to day
 
 Enter house mode from the same checkout:
 
@@ -414,52 +447,23 @@ Enter house mode from the same checkout:
 bin/house           # or: FOREMAN_MODE=house pi
 ```
 
-House is a *mode beside foreman*, not a second foreman. The crew machinery stays
-untouched underneath and house simply does not use it: in house mode nothing is
-spawned, merged, archived, edited or executed. A house session opens on the
-rounds, so it starts knowing the areas. The [`house` skill](.pi/skills/house/SKILL.md)
-frames the work; [HOUSE.md](HOUSE.md) is who House is.
-
-### The loop
+It opens on the rounds, so it starts knowing your areas. Then you just talk to
+it:
 
 ```
-> track the lighthouse as a deck
-> the deck is out for review, next is to tighten the ask
 > rounds
-
   atlas           repo   2d   status: parser merged, flags half done  next: add --dry-run
   lighthouse      deck   1d   status: out for review                  next: tighten the ask
   expo-talk       deck   9d   status: slides started                  next: -  [no next]
 
+> track the lighthouse as a deck
+> the deck is out for review, next is to tighten the ask
 > what's next for expo-talk?
   ... diagnoses the chart, sets the step, and prints a prompt ready to paste
 > send that to expo-talk
 ```
 
-House's four verbs are the whole job: **examine, diagnose, prescribe, send on
-command.** When work should happen, House writes the prescription and hands it
-over; it never does the work itself.
-
-### House commands
-
-Each is a zero-token script; the `house_*` tools in the extension are thin
-wrappers over them. Every command takes `--help`.
-
-| Command | Verbs | Does |
-|---|---|---|
-| `bin/house-area.sh` | `add` `list` `show` `archive` | the chart: open an area, see them, read one, retire one |
-| `bin/house-note.sh` | `--status` `--next` | append a dated note and bump `updated` |
-| `bin/house-next.sh` | `--clear` | set or clear the diagnosed next step |
-| `bin/house-rounds.sh` | `--all` `--stale-days` `--digest` | one line per area; mark stale or no-next |
-| `bin/house-prescribe.sh` | `--copy` `--stdout` `--context` | write the paste-ready prompt to the outbox |
-| `bin/house-send.sh` | `--yes` | dry-run, or deliver the latest prescription to `bind` |
-| `bin/house-demo.sh` | `seed` `clear` | install or remove a scratch demo cast for exercising house |
-
-`house-demo.sh` is a scratch fixture, not the captain's real work: `seed`
-installs a small cast of demo areas and `clear` removes exactly the charts it
-wrote, so the whole loop can be exercised with no real areas to hand.
-
-A chart is a few `key: value` header lines and an append-only dated log:
+A chart is a few `key: value` lines and an append-only dated log:
 
 ```
   slug: atlas
@@ -477,10 +481,26 @@ A chart is a few `key: value` header lines and an append-only dated log:
   - 2026-06-03 - closed the parser PR
 ```
 
-Prescriptions land in `.foreman/house/outbox/<slug>-<ts>.md`; `--copy` puts them
-on the clipboard (`pbcopy`, `xclip` or `wl-copy`, degrading with a message), and
-`house-send.sh` delivers one through the same durable inbox a crew steer uses
-when the area's `bind` names a crew task.
+### House commands
+
+Each is a small script, and each takes `--help`. Normally you say what you want
+and house picks the tool.
+
+| Command | Verbs | Does |
+|---|---|---|
+| `bin/house-area.sh` | `add` `list` `show` `archive` | the chart: open an area, see them all, read one, retire one |
+| `bin/house-note.sh` | `--status` `--next` | append a dated note and bump `updated` |
+| `bin/house-next.sh` | `--clear` | set or clear the diagnosed next step |
+| `bin/house-rounds.sh` | `--all` `--stale-days` `--digest` | one line per area; mark stale or no-next |
+| `bin/house-prescribe.sh` | `--copy` `--stdout` `--context` | write the paste-ready prompt to the outbox |
+| `bin/house-send.sh` | `--yes` | dry-run, or deliver the latest prescription to `bind` |
+| `bin/house-demo.sh` | `seed` `clear` | install or remove a scratch demo cast for exercising house |
+
+A prescription lands in `.foreman/house/outbox/<slug>-<ts>.md`. `--copy` also puts
+it on the clipboard (`pbcopy`, `xclip` or `wl-copy`, degrading with a message),
+and `house-send.sh --yes` delivers it through the same durable inbox a crew steer
+uses, when the area's `bind` names a crew task. `house-demo.sh` is a scratch
+fixture, not your real work.
 
 ## What you can ask the foreman for
 
