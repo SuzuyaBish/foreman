@@ -448,6 +448,11 @@ wrappers over them. Every command takes `--help`.
 | `bin/house-rounds.sh` | `--all` `--stale-days` `--digest` | one line per area; mark stale or no-next |
 | `bin/house-prescribe.sh` | `--copy` `--stdout` `--context` | write the paste-ready prompt to the outbox |
 | `bin/house-send.sh` | `--yes` | dry-run, or deliver the latest prescription to `bind` |
+| `bin/house-demo.sh` | `seed` `clear` | install or remove a scratch demo cast for exercising house |
+
+`house-demo.sh` is a scratch fixture, not the captain's real work: `seed`
+installs a small cast of demo areas and `clear` removes exactly the charts it
+wrote, so the whole loop can be exercised with no real areas to hand.
 
 A chart is a few `key: value` header lines and an append-only dated log:
 
