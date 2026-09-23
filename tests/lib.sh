@@ -115,6 +115,18 @@ fm_tmproot() { # [prefix] -> fresh directory path
   printf '%s\n' "$root"
 }
 
+# fm_pi_tree <root>: mirror the pi-visible tree into <root>/.pi the way pi sees
+# it in the repository. pi loads every direct .ts under extensions/ as an
+# extension of its own, so a module the extension imports must live outside it,
+# in the sibling lib/. A test that copies only extensions/ therefore breaks the
+# extension on its relative import; copy both.
+fm_pi_tree() {
+  local root=$1
+  mkdir -p "$root/.pi/extensions" "$root/.pi/lib"
+  cp "$ROOT/.pi/extensions/"*.ts "$root/.pi/extensions/"
+  cp "$ROOT/.pi/lib/"*.ts "$root/.pi/lib/"
+}
+
 # --- isolated environment ---------------------------------------------------
 
 # fm_home: create a throwaway foreman home/projects/worktrees and export the

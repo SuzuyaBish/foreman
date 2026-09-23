@@ -24,7 +24,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-// Calm's presentation is a vendored, credited sibling module (see ./calm.ts).
+// Calm's presentation is a vendored, credited sibling module (see ../lib/calm.ts).
 import {
 	calmIsActive,
 	installCalmAdapter,
@@ -32,7 +32,7 @@ import {
 	registerCalmBuiltins,
 	setCalm,
 	calmTool,
-} from "./calm.ts";
+} from "../lib/calm.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -758,7 +758,7 @@ const lavishPoll = defineTool({
 
 // --- calm mode -------------------------------------------------------------
 //
-// The presentation itself lives in ./calm.ts, vendored from firstmate's Pi Calm
+// The presentation itself lives in ../lib/calm.ts, vendored from firstmate's Pi Calm
 // and credited there. This file owns only the foreman's wiring: the persisted
 // `crewCalm` flag, the `/crew calm` grammar, and reading the choice back at
 // session start. `calmIsActive()` is consulted when a row renders, so a toggle
