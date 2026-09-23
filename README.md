@@ -22,18 +22,24 @@ runs at every session start; it is silent unless something is wrong.
 ## Run
 
 ```sh
-foreman/bin/foreman
+cd foreman
+pi
 ```
 
-Starts `pi` in this directory with the crew tools loaded. The first thing you
-type is a message to your foreman. You never run the other commands below by
-hand unless you want to.
+That is the whole thing. Pi loads `.pi/extensions/foreman.ts` because it is
+project-local, and `AGENTS.md` as standing instructions. The first time in a
+fresh clone, approve Pi's project-trust prompt: project extensions are not loaded
+before the project is trusted, and approving is once per clone. `foreman/bin/foreman`
+does the same thing after creating `projects/` and `worktrees/`; it does not name
+the extension with `-e`, because doing that *as well* would load it twice.
 
-The chrome and the crew tools belong to this session only. The extension is not
-installed in pi, so a plain `pi` session — even after a reload — has no widget,
-no status line, no `crew_*` tools and no digest. That is deliberate: installing
-it globally would start its auto-wake watcher in every session, in every
-project. Start the foreman to see the chrome.
+The first thing you type is a message to your foreman. You never run the other
+commands below by hand unless you want to.
+
+The chrome and the crew tools belong to this directory. A pi session started
+everywhere else — even after a reload — has no widget, no status line, no
+`crew_*` tools and no digest. That is deliberate: installing the extension
+globally would start its auto-wake watcher in every session, in every project.
 
 Every session starts the same way: the foreman reads `foreman/HANDOFF.md` (the
 standing architecture and traps) and then `crew_todo` (the durable plan), as

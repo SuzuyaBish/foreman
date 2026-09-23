@@ -6,7 +6,7 @@
 #
 # Only the open/end/export halves live here. `lavish-axi poll` must be a tracked
 # background child of the session that asked for it — never a shell command — so
-# the poll is owned by the session extension in extensions/foreman.ts and by the
+# the poll is owned by the session extension in .pi/extensions/foreman.ts and by the
 # generated per-crew extension, not by this script.
 set -eu
 

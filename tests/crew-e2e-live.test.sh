@@ -17,7 +17,9 @@
 #   * it opens a real Herdr tab and closes it again in the trap, even on failure;
 #   * it registers folder trust for a throwaway worktree, because an unattended
 #     pane cannot answer a trust prompt. PI_TRUST_FILE is unset here on purpose:
-#     the pane's own pi reads the real trust file, not this shell's.
+#     the pane's own pi reads the real trust file, not this shell's. The trap
+#     removes that entry again, and the session directory pi creates for the
+#     crew, so a run leaves the captain's pi state as it found it.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -67,6 +69,12 @@ cleanup() {
   # Only close a workspace this test created; never one the captain was in.
   if [ -z "$AMBIENT_WS" ] && [ -n "${WS:-}" ] && [ "$WS" != "$AMBIENT_WS" ]; then
     herdr --session "${FOREMAN_SESSION:-default}" workspace close "$WS" >/dev/null 2>&1 || true
+  fi
+  # Leave no trace in the captain's pi state: pi keys a session directory by the
+  # crew's cwd, and the launch registered folder trust for that cwd.
+  if [ -n "${WT:-}" ]; then
+    rm -rf "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions/--$(printf '%s' "${WT#/}" | tr '/' '-')--"
+    "$BIN/crew-trust.sh" --remove "$WT" >/dev/null 2>&1 || true
   fi
   fm_test_cleanup
 }

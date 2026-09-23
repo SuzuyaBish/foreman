@@ -52,8 +52,11 @@ This is the whole design. Everything else is plumbing.
 ```
 foreman/
   AGENTS.md              standing instructions loaded into the foreman session
-  extensions/foreman.ts  the model-facing tools, auto wake, and crew chrome
-  bin/foreman            launcher: pi -e extensions/foreman.ts
+  .pi/extensions/foreman.ts
+                         the model-facing tools, auto wake, and crew chrome.
+                         Project-local, so pi discovers it whenever it runs in
+                         this directory; trust the project once per clone.
+  bin/foreman            convenience: create the project dirs, then start pi
   bin/*.sh               zero-token mechanics
   bin/crew-test.sh       runs the behaviour suite
   tests/<subject>.test.sh  one file per subject; fake herdr/gh/pi

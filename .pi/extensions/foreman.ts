@@ -25,7 +25,28 @@ import {
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The install root: the nearest ancestor carrying the mechanics in `bin/`. The
+ * extension lives in `<root>/.pi/extensions/`, where pi discovers it, so the
+ * root is two directories up — but counting directories up would break the first
+ * time this file moves, and a wrong answer here means writing state to the wrong
+ * place. Ask for the thing itself and fail loudly instead.
+ */
+function installRoot(start: string): string {
+	let dir = start;
+	for (;;) {
+		if (fs.existsSync(path.join(dir, "bin", "foreman-lib.sh"))) return dir;
+		const up = path.dirname(dir);
+		if (up === dir) {
+			throw new Error(`foreman: no install root above ${start} (bin/foreman-lib.sh not found)`);
+		}
+		dir = up;
+	}
+}
+
+const ROOT = process.env.FOREMAN_ROOT ?? installRoot(HERE);
 const BIN = path.join(ROOT, "bin");
 const HOME = process.env.FOREMAN_HOME ?? path.join(ROOT, ".foreman");
 const TASKS = path.join(HOME, "tasks");

@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# foreman - start the foreman session: pi, in this directory, with the crew
-# tools loaded and AGENTS.md as standing instructions.
+# foreman - start the foreman session.
+#
+# Convenience only: pi discovers .pi/extensions/foreman.ts on its own when it
+# runs in this directory, so `cd foreman && pi` is the whole story. This creates
+# the project directories and starts pi here. It deliberately does NOT pass -e:
+# the extension is already project-local, and naming it twice would load it twice
+# (two wake watchers, duplicated tools).
 set -eu
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$DIR"
 mkdir -p projects worktrees
-exec "${FOREMAN_PI_BIN:-pi}" -e "$DIR/extensions/foreman.ts" "$@"
+exec "${FOREMAN_PI_BIN:-pi}" "$@"

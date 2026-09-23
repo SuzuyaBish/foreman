@@ -14,10 +14,13 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 ROOTDIR=$(fm_tmproot chrome)
-EXTDIR="$ROOTDIR/ext"
+# The layout pi discovers: <root>/.pi/extensions/, with the mechanics in
+# <root>/bin so the extension can find its install root the way it does in place.
+EXTDIR="$ROOTDIR/.pi/extensions"
 mkdir -p "$EXTDIR" "$ROOTDIR/node_modules/@earendil-works/pi-ai" \
   "$ROOTDIR/node_modules/@earendil-works/pi-coding-agent"
-cp "$ROOT/extensions/foreman.ts" "$EXTDIR/foreman.ts"
+ln -s "$ROOT/bin" "$ROOTDIR/bin"
+cp "$ROOT/.pi/extensions/foreman.ts" "$EXTDIR/foreman.ts"
 
 cat >"$ROOTDIR/node_modules/@earendil-works/pi-ai/package.json" <<'JSON'
 { "name": "@earendil-works/pi-ai", "type": "module", "exports": "./index.js" }

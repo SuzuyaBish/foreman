@@ -20,6 +20,8 @@
 #   * it writes gh's credential helper into the throwaway repository's own
 #     config, never the captain's global config, so `git push` cannot hang on a
 #     prompt in an unattended pane.
+# The trap puts all of it back: the tab, the trust entry, the session directory pi
+# creates for the crew, and the throwaway repository.
 #
 # Deleting the repository needs the `delete_repo` token scope. Without it the
 # push/PR/merge path still proves itself; the repo is left behind and the exact
@@ -71,6 +73,12 @@ cleanup() {
   fi
   if [ -z "$AMBIENT_WS" ] && [ -n "${WS:-}" ] && [ "$WS" != "$AMBIENT_WS" ]; then
     herdr --session "${FOREMAN_SESSION:-default}" workspace close "$WS" >/dev/null 2>&1 || true
+  fi
+  # Leave no trace in the captain's pi state: pi keys a session directory by the
+  # crew's cwd, and the launch registered folder trust for that cwd.
+  if [ -n "${WT:-}" ]; then
+    rm -rf "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions/--$(printf '%s' "${WT#/}" | tr '/' '-')--"
+    "$BIN/crew-trust.sh" --remove "$WT" >/dev/null 2>&1 || true
   fi
   if ! gh repo delete "$REPO" --yes >/dev/null 2>&1; then
     printf 'note: %s was left behind (deleting needs the delete_repo scope):\n' "$REPO"
