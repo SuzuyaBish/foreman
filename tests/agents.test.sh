@@ -13,6 +13,26 @@ STANDING_EXAMPLE="$ROOT/HANDOFF.example.md"
 
 section_line() { grep -n "^## $1\$" "$AGENTS" 2>/dev/null | head -1 | cut -d: -f1; }
 
+# The delivery section is where the captain is asked to accept work, so the
+# naming rule has to live there: a report that gives only the PR title, or only a
+# crew id, leaves the captain unsure which todo item they are accepting. The
+# number and the title are the two halves of that name, the PR url is what the
+# captain clicks, and an unlinked crew needs a stated fallback instead of a
+# silent one - so each is pinned as content, not trusted to prose.
+test_the_delivery_section_names_the_work() {
+  local delivery
+  delivery=$(sed -n '/^## Delivery, merges, and waiting$/,/^## /p' "$AGENTS")
+  assert_contains "$delivery" "todo item" "the delivery section ties a report to its linked todo item"
+  assert_contains "$delivery" "number" "the delivery section requires the item's number"
+  assert_contains "$delivery" "title" "the delivery section requires the item's title"
+  assert_contains "$delivery" "PR url" "the delivery section names the PR url"
+  # The crew id alone is explicitly not the name the captain is shown; if this
+  # line goes, the id can quietly become what they are asked to accept.
+  assert_contains "$delivery" "crew id" "the delivery section rules out the crew id alone"
+  assert_contains "$delivery" "no linked todo item" "the delivery section states the fallback for an unlinked crew"
+  pass "the delivery section names the work by todo number and title"
+}
+
 test_the_ritual_comes_first() {
   assert_present "$AGENTS" "the standing instructions exist"
   local start rule
@@ -97,4 +117,5 @@ test_the_ritual_comes_first
 test_the_ritual_names_the_two_steps
 test_the_injected_messages_are_explained
 test_the_work_section_defaults_to_parallel_crews
+test_the_delivery_section_names_the_work
 test_the_contents_maps_every_section
