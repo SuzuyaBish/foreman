@@ -41,6 +41,21 @@ PR=$(foreman_meta_get "$ID" pr)
 
 command -v gh >/dev/null 2>&1 || foreman_die "gh is not on PATH"
 
+# --- merge-conflict recovery -----------------------------------------------
+#
+# A refusal that is neither transient nor a success is not automatically a
+# conflict: a failing required check and a permission error are real refusals
+# too, and neither is the crew's to fix by rebasing. The forge, not gh's
+# wording, is the authority on which it is. `mergeable: CONFLICTING` (or a
+# `mergeStateStatus` of `DIRTY`) is the conflict signature; anything else falls
+# through to the plain blocker. Prints the `gh pr view` JSON, or nothing when
+# the forge cannot be asked -- itself a fall-through, never a hard failure.
+merge_conflict_json() { # <project> <pr>
+  local proj=$1 pr=$2
+  command -v jq >/dev/null 2>&1 || return 1
+  (cd "$proj" && gh pr view "$pr" --json mergeable,mergeStateStatus,files,url 2>/dev/null) || return 1
+}
+
 PROJ=$(foreman_meta_get "$ID" project)
 [ -n "$PROJ" ] && [ -d "$PROJ" ] || PROJ=$(foreman_meta_get "$ID" cwd)
 [ -n "$PROJ" ] && [ -d "$PROJ" ] || PROJ=$PWD
@@ -108,6 +123,50 @@ if foreman_merge_refusal_transient "$ERR"; then
     "merge refused transiently for $PR after $ATTEMPTS attempts, still in review: $REASON"
   foreman_status_sync "$ID"
   foreman_die "gh could not merge $PR yet (transient refusal; task stays in review): $REASON"
+fi
+
+# A real refusal. If the forge says the pull request is in conflict, hand the
+# resolution to the crew that owns it. Recovery is automatic; merging is not:
+# this only asks, blocks, and stops. The crew's re-report is what makes a retry
+# possible again, and the captain's go-ahead is still what authorises it.
+CONFLICT_JSON=$(merge_conflict_json "$PROJ" "$PR" 2>/dev/null || true)
+if [ -n "$CONFLICT_JSON" ] &&
+  printf '%s' "$CONFLICT_JSON" |
+  jq -e '(.mergeable == "CONFLICTING") or (.mergeStateStatus == "DIRTY")' >/dev/null 2>&1; then
+  CONFLICT_URL=$(printf '%s' "$CONFLICT_JSON" | jq -r '.url // empty' 2>/dev/null || true)
+  [ -n "$CONFLICT_URL" ] || CONFLICT_URL=$PR
+  CONFLICT_FILES=$(printf '%s' "$CONFLICT_JSON" | jq -r '.files[]?.path // empty' 2>/dev/null || true)
+  FILES_ONELINE=$(printf '%s' "$CONFLICT_FILES" | awk 'NF { if (n++) printf ", "; printf "%s", $0 }')
+  [ -n "$FILES_ONELINE" ] || FILES_ONELINE="the forge listed none"
+
+  # Self-contained and short: a competent peer who cannot see this conversation
+  # gets the pull request, the files, and exactly what to do.
+  MSG="Merge conflict on $CONFLICT_URL: GitHub refused the merge because this branch conflicts with the base branch."
+  MSG="$MSG"$'\n'"Conflicting files:"
+  if [ -n "$CONFLICT_FILES" ]; then
+    while IFS= read -r f; do
+      if [ -n "$f" ]; then MSG="$MSG"$'\n'"  - $f"; fi
+    done <<<"$CONFLICT_FILES"
+  else
+    MSG="$MSG"$'\n'"  (the forge listed none)"
+  fi
+  MSG="$MSG"$'\n'"Rebase onto the current origin/main, resolve the conflicts so both changes survive, run the full suite (bin/crew-test.sh), push the branch, and report review again."
+
+  # The durable inbox record is the delivery; the doorbell is best-effort. If
+  # the crew cannot be reached at all we still block, with the files and gh's
+  # reason, so the captain can act -- never fail to block, never lose the reason.
+  if "$FOREMAN_ROOT/bin/crew-send.sh" "$ID" "$MSG" >/dev/null 2>&1; then
+    foreman_event_append "$ID" progress "" \
+      "conflict recovery: asked crew $ID to rebase $CONFLICT_URL; conflicting files: $FILES_ONELINE"
+    foreman_event_append "$ID" blocked "" \
+      "merge conflict on $CONFLICT_URL; recovery in flight: crew $ID asked to rebase (files: $FILES_ONELINE); gh: $REASON"
+    foreman_status_sync "$ID"
+    foreman_die "merge conflict on $CONFLICT_URL; crew $ID asked to rebase (files: $FILES_ONELINE); task blocked"
+  fi
+  foreman_event_append "$ID" blocked "" \
+    "merge conflict on $CONFLICT_URL; could not ask crew $ID to rebase (files: $FILES_ONELINE); gh: $REASON"
+  foreman_status_sync "$ID"
+  foreman_die "merge conflict on $CONFLICT_URL; could not ask crew $ID to rebase (files: $FILES_ONELINE); gh: $REASON"
 fi
 
 foreman_event_append "$ID" blocked "" "merge command failed for $PR: $REASON"
