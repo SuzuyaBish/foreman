@@ -12,6 +12,25 @@ fm_herdr_stub >/dev/null
 SEND="$BIN/crew-send.sh"
 INBOX="$BIN/crew-inbox.sh"
 
+test_send_reaches_a_settled_crew() {
+  # The incident's case: a crew reported `done` and its pane is idle at the
+  # prompt. Reuse is a single send, with no ceremony and no new crew.
+  fm_task t-done done >/dev/null
+  fm_attach_pane t-done >/dev/null
+  local out
+  out=$("$SEND" t-done "the lines were too on-the-nose; use these instead")
+  assert_contains "$out" "recorded" "send records against a settled crew"
+  assert_contains "$out" "pane doorbell: yes" "the settled crew's pane takes the doorbell"
+  assert_present "$FOREMAN_HOME/tasks/t-done/inbox/001.msg" "the instruction is durable for a done crew"
+  assert_contains "$(cat "$FOREMAN_HOME/tasks/t-done/inbox/001.msg")" "on-the-nose" \
+    "the follow-up requirement is carried"
+  # The state is the agent's to change, not the sender's: a steer must not fake
+  # a working crew, or a watcher would read a settled task as live again.
+  assert_equals "done" "$(sed -n 's/^state=//p' "$FOREMAN_HOME/tasks/t-done/status")" \
+    "a send does not rewrite the crew's own state"
+  pass "a crew in done takes a send without ceremony"
+}
+
 test_send_writes_durable_record_and_rings() {
   fm_task t1 working >/dev/null
   fm_attach_pane t1 >/dev/null
@@ -98,6 +117,7 @@ test_refusals() {
   pass "sends are validated"
 }
 
+test_send_reaches_a_settled_crew
 test_send_writes_durable_record_and_rings
 test_inbox_reads_and_acknowledges
 test_peek_does_not_acknowledge

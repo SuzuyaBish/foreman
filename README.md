@@ -187,6 +187,13 @@ A research task delivers a report instead (`done`, no PR); a project without a
 forge remote delivers locally. `crewDelivery` sets which is normal, and
 `crew_archive` refuses a task whose PR is still open.
 
+Because the instance is held, follow-up work on that item goes back to it: a
+sharpened requirement, a correction, or a second pass is a `crew_send` to the
+same crew, which still holds its context and its worktree, rather than a fresh
+crew that starts blind. A genuinely different piece of work is a new item and a
+new crew. When that crew's pane is gone, `crew_recover` brings the same task
+back in its existing worktree instead of a respawn.
+
 ## Talking to a crew
 
 You do not have to talk to a crew member directly — ask the foreman and it
@@ -336,7 +343,9 @@ A foreman session can die with crew still running, and a Herdr pane can be
 destroyed out from under live work. Session start reconciles both. `crew_recover`
 reports which tasks have no endpoint, and `crew_recover <id>` puts a fresh agent
 back into that task's **existing** worktree with a progress note — commits and
-uncommitted work survive, and the task keeps its identity.
+uncommitted work survive, and the task keeps its identity. The same path reuses
+a settled crew: a task that reached `done` and lost its pane comes back under
+its own id, never as a respawn.
 
 Wakes are durable too: rows are appended before anything is announced and
 acknowledged by sequence, so a crash, a restart, or a session replacement cannot
@@ -573,7 +582,7 @@ toggles the widget.
 | `bin/foreman` | start the foreman session |
 | `bin/house` | start a session in house mode |
 | `bin/crew-todo.sh` | the durable project list |
-| `bin/crew-spawn.sh <id> --project <p> <task…>` | worktree + pane + fresh pi |
+| `bin/crew-spawn.sh <id> --project <p> [--todo <n>] <task…>` | worktree + pane + fresh pi; `--todo` warns when that item already has a live crew |
 | `bin/crew-list.sh` | todo + crew board; regenerates `BOARD.md` |
 | `bin/crew-report.sh <id> <verb> [note] [--key K] [--pr URL]` | *crew side:* record an event |
 | `bin/crew-processes.sh list\|count\|kill\|snapshot <id>` | *crew side:* what this crew still has running, and the teardown |

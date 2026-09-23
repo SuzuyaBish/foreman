@@ -128,6 +128,28 @@ test_relaunch_requires_a_working_directory() {
   pass "a relaunch needs somewhere to work"
 }
 
+test_relaunch_continues_a_done_crew() {
+  # A settled crew whose pane is gone is reused through recovery, not a fresh
+  # spawn: the same task id and the same worktree, with its work intact.
+  fm_task d1 done >/dev/null
+  local cwd
+  cwd=$(fm_tmproot done-cwd)
+  printf 'original brief\n' >"$FOREMAN_HOME/tasks/d1/brief.md"
+  printf 'cwd=%s\nworktree=%s\n' "$cwd" "$cwd" >>"$FOREMAN_HOME/tasks/d1/meta"
+  printf 'uncommitted work\n' >"$cwd/scratch.txt"
+  "$BIN/crew-busy-event.sh" arm "$FOREMAN_HOME" d1 --state busy >/dev/null
+
+  local out
+  out=$("$RECOVER" --relaunch d1)
+  assert_contains "$out" "launched d1" "a done crew whose pane is gone relaunches in place"
+  assert_equals "working" "$(state_of d1)" "the reused crew is working again"
+  assert_equals "recovered" "$(note_of d1)" "the relaunch is recorded as a recovery"
+  assert_contains "$(cat "$FOREMAN_HOME/tasks/d1/brief.md")" "Progress note" "the brief gains the recovery note"
+  assert_equals "original brief" "$(head -n 1 "$FOREMAN_HOME/tasks/d1/brief.md")" "the original brief survives"
+  assert_present "$cwd/scratch.txt" "uncommitted work survives reuse"
+  pass "a done task is recoverable in its own worktree, under its own id"
+}
+
 test_an_empty_fleet_has_no_orphans
 test_scan_reports_endpoints
 test_scan_classifies_settled_and_review
@@ -135,3 +157,4 @@ test_scan_queue_appends_a_wake
 test_relaunch_reuses_the_existing_worktree
 test_relaunch_refuses_a_live_pane
 test_relaunch_requires_a_working_directory
+test_relaunch_continues_a_done_crew
