@@ -48,9 +48,10 @@ test_the_round_trip() {
 <body><h1 id="title">Live round trip</h1><p>Feedback should come back.</p></body></html>
 HTML
 
-  # open (through our script, the same path a crew tool takes)
+  # open (through our script, the same path a crew tool takes). This board is
+  # deliberately text-only, so it takes the --text-only escape.
   local open_out url key
-  open_out=$("$BIN/crew-lavish.sh" open "$ART" 2>&1)
+  open_out=$("$BIN/crew-lavish.sh" open --text-only "$ART" 2>&1)
   url=$(printf '%s\n' "$open_out" | sed -n 's/^ *url: "\(.*\)"$/\1/p' | head -1)
   [ -n "$url" ] || fail "crew-lavish.sh open printed no session url:
 $open_out"

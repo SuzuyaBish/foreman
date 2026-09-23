@@ -159,6 +159,10 @@ test_generates_a_bound_extension() {
   assert_contains "$body" "$BIN/crew-report.sh" "the report script is addressed directly"
   assert_contains "$body" "$BIN/crew-processes.sh" "the teardown script is addressed directly"
   assert_contains "$body" "crew_cleanup" "the crew can stop what it started"
+  # open routes through crew-lavish.sh, which runs the board check first.
+  assert_contains "$body" "$BIN/crew-lavish.sh" "the open tool routes through the board check"
+  assert_contains "$body" '"open"' "the open tool invokes the open verb"
+  assert_contains "$body" '"--text-only"' "the static-board escape is offered"
   pass "the extension is generated and every placeholder is substituted"
 }
 

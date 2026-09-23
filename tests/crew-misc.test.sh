@@ -89,7 +89,9 @@ test_models_is_bounded() {
 test_lavish_halves() {
   local artifact
   artifact=$(fm_tmproot lavish)/board.html
-  printf '<html></html>\n' >"$artifact"
+  # A board that declares a choice, so `open` passes its own board check. The
+  # choice-less refusal is pinned in crew-board.test.sh.
+  printf '<html><body><form data-lavish-question="q"><button>Queue answer</button></form><script>window.lavish.queuePrompt("x",{})</script></body></html>\n' >"$artifact"
 
   if PATH=$(fm_path_without lavish-axi) "$BIN/crew-lavish.sh" open "$artifact" >/dev/null 2>&1; then
     fail "opening a board without lavish-axi was accepted"

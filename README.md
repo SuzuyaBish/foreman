@@ -427,6 +427,23 @@ the poll is a tracked background child of that session — the shape `lavish-axi
 requires, and the reason a long poll never holds a turn. Crew are told to use a
 board by default for visual work.
 
+Lavish draws no pick UI of its own: the artifact has to build its controls and
+call `window.lavish.queuePrompt()` once, from an explicit submit. Crews build
+boards from `assets/board-template.html`, which demonstrates both shapes — a
+single choice (radios + “Queue answer”) and a multi-pick (checkbox rows + a
+bottom “Queue dispatch order” bar). The captain queues his answers and then
+presses the composer's red **“Send & End”**; the overflow menu's “End session”
+POSTs `/end` without submitting the browser-local queue. The template is adapted
+from firstmate's Bearings board (MIT; see `assets/board-template.LICENSE`), and
+`bin/crew-board.sh new` scaffolds it.
+
+Before a board opens, `bin/crew-board.sh check` is run — by `crew-lavish.sh`
+and by the crew's `lavish_open` tool. It refuses a board that declares no
+choices (the norm is a pick block, and a deliberately text-only board passes
+`--text-only`), and warns when an absolutely positioned overlay has no clipping
+or uses the two-classes-on-an-ancestor selector that once let the safe-margin
+guides bleed across the page.
+
 Poll output ends with a full DOM serialization of the artifact, so both tools
 trim that line and cap the rest at ~4 KB before it reaches a model. The live
 path is opt-in tested: `FOREMAN_LAVISH_E2E=1 bin/crew-test.sh tests/crew-lavish-live.test.sh`
@@ -612,7 +629,8 @@ toggles the widget.
 | `bin/crew-config.sh` | show / set crew settings |
 | `bin/crew-worktree.sh add\|remove` | the git worktree mechanics |
 | `bin/crew-trust.sh <path>` | pi folder trust for a path |
-| `bin/crew-lavish.sh open\|end\|export` | review boards |
+| `bin/crew-lavish.sh open [--text-only]\|end\|export` | review boards; `open` runs the board check first |
+| `bin/crew-board.sh new\|check` | scaffold a board from the template / check it before opening |
 | `bin/crew-peek.sh <id> [n]` | bounded tail of the pane |
 | `bin/crew-send.sh <id> <text…>` | durable inbox record + doorbell |
 | `bin/crew-inbox.sh <id>` | *crew side:* read and acknowledge steers |

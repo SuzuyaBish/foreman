@@ -303,8 +303,26 @@ starting anything long, and again after finishing a step.
 If your deliverable is visual — a UI mock, a plan, a comparison, a review surface
 — build it as an HTML artifact and open a Lavish board with the \`lavish_open\`
 tool, then call \`lavish_poll\` once and leave it running. The captain annotates
-the page and the feedback comes back to you. After opening the board, record
-what you need reviewed with:
+the page and the feedback comes back to you.
+
+Build the board from our own template, not from scratch:
+
+  $FOREMAN_ROOT/assets/board-template.html
+  $FOREMAN_ROOT/bin/crew-board.sh new <out.html>      (copies the template)
+
+Lavish draws no pick UI of its own. The artifact declares its own choices: a
+\`<form data-lavish-question="…">\` with radios and a "Queue answer" button, or
+checkbox rows with a bottom "Queue dispatch order" bar. Call
+\`window.lavish.queuePrompt()\` exactly once, from that explicit submit — never
+on change. A board with no pick blocks is not ready to open: `lavish_open` runs
+\`crew-board.sh check\` first and refuses it. The template demonstrates both
+shapes, working.
+
+Tell the captain to queue his answers, then press the composer's red
+**Send & End** — that submits the queue and ends in one act. The overflow menu's
+"End session" drops the browser-local queue and loses whatever he queued.
+
+After opening the board, record what you need reviewed with:
 
   crew_report(verb="needs-decision", note="<what you need reviewed>", key="board-url")
 
