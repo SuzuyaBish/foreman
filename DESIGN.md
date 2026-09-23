@@ -197,6 +197,20 @@ branch always survives, and archiving a task never deletes commits.
 The foreman merges with `crew_merge` **only when the captain has said to**. That
 guard is the tool's whole reason for existing separately from `gh`.
 
+**Breadth is the default.** The foreman exists to keep work out of its own
+context, and an isolated worktree, branch and pane make that cheap: a second
+independent piece costs another crew, not another turn of the foreman's
+transcript. So a request that decomposes into independent pieces becomes one
+crew per piece, running concurrently, rather than the foreman working through
+them in sequence or doing them by hand; its context is the scarce resource, and
+several pieces whose output it would otherwise have to read should be in flight
+together. The one thing that cannot be parallelised is the file. Two crews
+editing the same file cannot merge cleanly — the second branch is a conflicted
+merge, and the truth lives split across two branches until someone reconciles
+it. Pieces that touch the same file are therefore sequenced: one crew lands its
+change and the next is cut from the result. Only genuinely disjoint pieces run
+at once.
+
 ## Recovery
 
 A foreman session can die with crew still running, and a Herdr pane can be
