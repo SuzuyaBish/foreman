@@ -1114,8 +1114,16 @@ function updateChrome(ctx: ExtensionContext) {
 		.filter((r) => ACTIVE_STATES.has(r.state))
 		.sort((a, b) => rankOf(a) - rankOf(b) || a.id.localeCompare(b.id));
 	const queued = todo.filter((t) => t.status !== "done");
+	// A crew row belongs to the fleet, not to one project's board, so its linked
+	// item is looked up across every scope. A crew working in another project
+	// must still show the number and title of the item it is on: `-` and
+	// `(no todo item)` mean "genuinely unlinked" and nothing else. Scoping this
+	// lookup to `queued` is what made a crew deploying in a project render as
+	// `- (no todo item)` whenever the board read another project, `foreman`
+	// included.
 	const itemOfCrew = new Map<string, TodoRow>();
-	for (const item of queued) {
+	for (const item of allTodo) {
+		if (item.status === "done") continue;
 		if (item.crew && item.crew !== "-" && !itemOfCrew.has(item.crew)) itemOfCrew.set(item.crew, item);
 	}
 	const spent = new Set<string>();
