@@ -35,7 +35,9 @@ test_plain_directory_spawn() {
   brief=$(cat "$TASKDIR/first/brief.md")
   assert_contains "$brief" "do the thing" "the brief carries the task"
   assert_contains "$brief" "$TASKDIR/first/report.md" "the brief names the report file"
-  assert_contains "$brief" "crew-report.sh" "the brief teaches the reporting tools"
+  assert_contains "$brief" "crew_report" "the brief teaches the reporting tool"
+  assert_not_contains "$brief" "crew-report.sh" "the brief does not hand the crew a bash command"
+  assert_contains "$brief" 'crew_report(verb="done", note=' "the report brief shows the finishing call"
   assert_contains "$brief" "needs-decision" "the brief explains how to ask for a decision"
   assert_contains "$brief" "crew-inbox.sh" "the brief tells the crew to check its inbox"
   assert_contains "$brief" "Never merge a pull request" "the brief states the authority rule"
@@ -95,6 +97,7 @@ test_isolation_uses_a_worktree() {
     fail "the crew branch exists in the project"
   assert_contains "$(cat "$TASKDIR/iso/meta")" "delivery=pr" "an origin remote makes the crew deliver a pull request"
   assert_contains "$(cat "$TASKDIR/iso/brief.md")" "git push -u origin crew/iso" "an isolated delivery teaches the push"
+  assert_contains "$(cat "$TASKDIR/iso/brief.md")" 'crew_report(verb="review", note=' "the pr brief shows the review call"
   pass "isolation gives the crew its own worktree on its own branch"
 }
 

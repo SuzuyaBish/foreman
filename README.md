@@ -123,10 +123,10 @@ stands.
 ## Decisions
 
 A crew member that hits a choice it should not make for itself asks for it
-instead:
+instead, through its `crew_report` tool:
 
 ```
-crew-report.sh <id> needs-decision "429 or 503?" --key status-code
+crew_report(verb="needs-decision", note="429 or 503?", key="status-code")
 ```
 
 It stays open until someone answers, and a later unrelated report cannot bury

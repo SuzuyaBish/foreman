@@ -141,7 +141,6 @@ fi
 case "$DELIVERY" in pr | local | report) ;; *) foreman_die "unknown delivery mode: $DELIVERY (pr|local|report)" ;; esac
 
 QHOME="FOREMAN_HOME=$(printf '%q' "$FOREMAN_HOME")"
-REPORT_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-report.sh") $ID"
 INBOX_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-inbox.sh") $ID"
 
 case "$DELIVERY" in
@@ -156,8 +155,8 @@ lives on branch \`crew/$ID\` in an isolated git worktree.
 2. Push it:  git push -u origin crew/$ID
 3. Open a pull request:
      gh pr create --title "<short title>" --body "<what changed, why, how you verified it>"
-4. Record it and finish:
-     $REPORT_CMD review "<one-line summary>" --pr "<the pull request url>"
+4. Record it and finish with the \`crew_report\` tool:
+     crew_report(verb="review", note="<one-line summary>", pr="<the pull request url>")
 
 Do not merge it — the captain does that. Leave the worktree, the branch and the
 commits exactly as they are; they are cleaned up after the merge.
@@ -170,7 +169,7 @@ local)
 
 Your work is on branch \`crew/$ID\`. Commit everything, then finish with:
 
-  $REPORT_CMD done "<one-line summary>"
+  crew_report(verb="done", note="<one-line summary>")
 
 Do not push and do not open a pull request. Leave the branch in place.
 EOF
@@ -182,7 +181,7 @@ report)
 
 The deliverable is the report file. Finish with:
 
-  $REPORT_CMD done "<one-line summary>"
+  crew_report(verb="done", note="<one-line summary>")
 
 Do not commit, push, or open a pull request unless the task itself asks for a
 change to the code.
@@ -214,13 +213,16 @@ Write your result to:
 Keep it tight and decision-shaped: what you did or found, the evidence, what is
 still unresolved. This file is the deliverable.
 
+Everything the foreman and the captain see from you goes through the
+\`crew_report\` tool — there is no bash command to remember.
+
 $DELIVERY_BLOCK
 
 ## Decisions
 
 If you hit a choice that is not yours to make, ask for it instead of guessing:
 
-  $REPORT_CMD needs-decision "<the question>" --key <short-key>
+  crew_report(verb="needs-decision", note="<the question>", key="<short-key>")
 
 Then stop and wait. The captain's answer arrives in your inbox as a resolved
 decision; check the inbox before resuming. Reuse the same key if you have to ask
@@ -228,7 +230,7 @@ again about the same thing.
 
 If you simply cannot proceed, use \`blocked\` instead:
 
-  $REPORT_CMD blocked "<one-line reason>"
+  crew_report(verb="blocked", note="<one-line reason>")
 
 ## New instructions
 
@@ -248,16 +250,15 @@ starting anything long, and again after finishing a step.
 If your deliverable is visual — a UI mock, a plan, a comparison, a review surface
 — build it as an HTML artifact and open a Lavish board with the \`lavish_open\`
 tool, then call \`lavish_poll\` once and leave it running. The captain annotates
-the page and the feedback comes back to you. Report what you need reviewed as
+the page and the feedback comes back to you. After opening the board, record
+what you need reviewed with:
 
-  $REPORT_CMD needs-decision "<what you need reviewed>" --key board-url
-
-after opening the board, and use the tool rather than a shell poll.
+  crew_report(verb="needs-decision", note="<what you need reviewed>", key="board-url")
 
 ## Rules
 
 - Work only inside $CWD unless the task says otherwise.
-- Do not ask the captain questions in chat. Use crew-report.sh.
+- Do not ask the captain questions in chat. Use the \`crew_report\` tool.
 - A done status with no report is a failed task.
 - Never merge a pull request yourself.
 EOF

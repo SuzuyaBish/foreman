@@ -70,7 +70,7 @@ foreman/
       status             derived cache: state= at= note=
       busy-state         semantic turn state: v1 gen= seq= state= source= ts=
       busy-gen           the incarnation token this crew's extension was armed with
-      pi-ext.ts          the busy/Lavish extension this crew member runs with
+      pi-ext.ts          the busy/report/Lavish extension this crew member runs with
       inbox/NNN.msg      steers from the foreman
       inbox/handled/     crew moves the file here to acknowledge
       inbox/.ring        re-ring ladder state
@@ -92,6 +92,11 @@ append-only log, not a mutable field, because the interesting question is never
 
 Verbs a crew member writes: `working`, `progress`, `blocked`, `needs-decision`,
 `review`, `done`, `failed`. The foreman writes `resolved`.
+
+A crew member writes them through the `crew_report` tool its generated extension
+provides, not through a hand-quoted shell command: the tool carries the call and
+passes the foreman home explicitly, while `crew-report.sh` stays the single owner
+of validation. A rejected call comes back to the crew as the tool's result.
 
 `status` is a derived cache folded from `events` by one owner
 (`foreman_fold_events`) so every reader agrees:
