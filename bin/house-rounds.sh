@@ -83,11 +83,11 @@ for slug in $slugs; do
   [ -f "$path" ] || continue
   total=$((total + 1))
   kind=$(house_field "$path" kind)
-  updated=$(house_field "$path" updated)
   status=$(house_field "$path" status)
   next=$(house_trim "$(house_field "$path" next)")
 
   marks=
+  age_label=$(house_age_label "$path" || printf '')
   age=$(house_age_days "$path" 2>/dev/null || printf '')
   if [ -z "$age" ]; then
     stale=1
@@ -108,8 +108,9 @@ for slug in $slugs; do
   fi
   [ "$archived" -eq 1 ] && marks="$marks [archived]"
 
-  row=$(printf '%-18s %-6s %-10s status: %s  next: %s%s' \
-    "$slug" "${kind:--}" "${updated:--}" "${status:--}" "${next:--}" "$marks")
+  row=$(printf '%-18s %-6s %-4s status: %-40s next: %s%s' \
+    "$slug" "${kind:--}" "${age_label:--}" \
+    "$(house_clip "${status:--}" 40)" "$(house_clip "${next:--}" 40)" "$marks")
   if [ -z "$lines" ]; then
     lines=$row
   else

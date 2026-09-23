@@ -245,6 +245,28 @@ house_age_days() { # <path>
   printf '%s' "$(((today_epoch - since) / 86400))"
 }
 
+# A compact relative age for the glanceable rows: `2d`, `0d`. A future date reads
+# as `0d`; the caller's marks say `[future]`.
+house_age_label() { # <path>
+  local age
+  age=$(house_age_days "$1" 2>/dev/null || printf '')
+  [ -n "$age" ] || return 1
+  [ "$age" -lt 0 ] && age=0
+  printf '%s' "${age}d"
+}
+
+# Clip a one-line field for a compact table: at most <width> characters, with an
+# ellipsis when it was cut. `area show` prints the file whole; only the
+# glanceable rows clip.
+house_clip() { # <text> <width>
+  local text=${1-} width=${2:-40}
+  if [ "${#text}" -le "$width" ]; then
+    printf '%s' "$text"
+  else
+    printf '%s…' "${text:0:$((width - 1))}"
+  fi
+}
+
 # Every active slug, sorted. With --all, archived slugs follow and are marked
 # by the caller via the path it reads.
 house_slugs() { # [--all]

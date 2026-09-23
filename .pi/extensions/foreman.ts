@@ -1473,7 +1473,9 @@ export default function foreman(pi: ExtensionAPI) {
 		// chart.
 		if (process.env.FOREMAN_MODE === "house") {
 			try {
-				const rounds = (await runHouse("house-rounds.sh", [], 4000)).trim();
+				// A clipped row is short, but a chart with many areas still adds up;
+				// 20k covers a few hundred rows without swallowing the whole turn.
+				const rounds = (await runHouse("house-rounds.sh", [], 20000)).trim();
 				if (rounds) {
 					pi.sendMessage(
 						{ customType: "house-rounds", content: rounds, display: false },

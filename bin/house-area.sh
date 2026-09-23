@@ -122,7 +122,7 @@ list)
     kind=$(house_field "$path" kind)
     updated=$(house_field "$path" updated)
     next=$(house_field "$path" next)
-    printf '%-18s %-6s %-10s %s\n' "$slug" "${kind:--}" "${updated:--}" "${next:--}"
+    printf '%-18s %-6s %-10s %s\n' "$slug" "${kind:--}" "${updated:--}" "$(house_clip "${next:--}" 60)"
   done
   if [ "$found" -eq 0 ]; then
     printf 'house: no areas\n'
