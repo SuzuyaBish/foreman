@@ -9,6 +9,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 fm_home >/dev/null
 fm_herdr_stub >/dev/null
+fm_pi_agent_dir >/dev/null
 
 RECOVER="$BIN/crew-recover.sh"
 state_of() { sed -n 's/^state=//p' "$FOREMAN_HOME/tasks/$1/status"; }
@@ -150,6 +151,47 @@ test_relaunch_continues_a_done_crew() {
   pass "a done task is recoverable in its own worktree, under its own id"
 }
 
+test_relaunch_model_falls_back_to_config() {
+  # A task that never recorded a model (spawned before crewModel was set) is
+  # relaunched on the configured one, not on whatever pi defaults to.
+  local cwd runs
+  cwd=$(fm_tmproot model-cwd)
+  fm_task m1 working >/dev/null
+  printf 'brief\n' >"$FOREMAN_HOME/tasks/m1/brief.md"
+  printf 'cwd=%s\n' "$cwd" >>"$FOREMAN_HOME/tasks/m1/meta"
+  "$BIN/crew-config.sh" set crewModel cfg-provider/cfg-model >/dev/null
+  "$BIN/crew-config.sh" set crewThinking medium >/dev/null
+
+  "$RECOVER" --relaunch m1 >/dev/null
+  runs=$(fm_herdr_pane_runs | grep "FOREMAN_CREW=m1 ")
+  assert_contains "$runs" "--model cfg-provider/cfg-model" "a meta without a model falls back to config crewModel"
+  assert_contains "$runs" "--thinking medium" "a meta without a thinking level falls back to config crewThinking"
+  assert_equals "cfg-provider/cfg-model" "$(meta_of m1 model)" "the fallback is recorded for the next relaunch"
+  assert_equals "medium" "$(meta_of m1 thinking)" "the thinking fallback is recorded too"
+
+  # The task's own record wins over config.
+  fm_task m2 working >/dev/null
+  printf 'brief\n' >"$FOREMAN_HOME/tasks/m2/brief.md"
+  printf 'cwd=%s\nmodel=meta-model\nthinking=high\n' "$cwd" >>"$FOREMAN_HOME/tasks/m2/meta"
+  "$RECOVER" --relaunch m2 >/dev/null
+  runs=$(fm_herdr_pane_runs | grep "FOREMAN_CREW=m2 ")
+  assert_contains "$runs" "--model meta-model" "the recorded model wins over config"
+  assert_contains "$runs" "--thinking high" "the recorded thinking level wins over config"
+  assert_not_contains "$runs" "cfg-model" "config does not override a recorded model"
+
+  # With neither, no flag is passed and pi's own default applies.
+  "$BIN/crew-config.sh" unset crewModel >/dev/null
+  "$BIN/crew-config.sh" unset crewThinking >/dev/null
+  fm_task m3 working >/dev/null
+  printf 'brief\n' >"$FOREMAN_HOME/tasks/m3/brief.md"
+  printf 'cwd=%s\n' "$cwd" >>"$FOREMAN_HOME/tasks/m3/meta"
+  "$RECOVER" --relaunch m3 >/dev/null
+  runs=$(fm_herdr_pane_runs | grep "FOREMAN_CREW=m3 ")
+  assert_not_contains "$runs" "--model" "no recorded or configured model passes none"
+  assert_not_contains "$runs" "--thinking" "no recorded or configured thinking level passes none"
+  pass "a relaunch uses the recorded model, then config"
+}
+
 test_an_empty_fleet_has_no_orphans
 test_scan_reports_endpoints
 test_scan_classifies_settled_and_review
@@ -158,3 +200,4 @@ test_relaunch_reuses_the_existing_worktree
 test_relaunch_refuses_a_live_pane
 test_relaunch_requires_a_working_directory
 test_relaunch_continues_a_done_crew
+test_relaunch_model_falls_back_to_config

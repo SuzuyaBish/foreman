@@ -156,9 +156,21 @@ POINTER="Read $DIR/brief.md and follow it exactly. It describes your whole task.
 # taking the crew's tools down with the error. So discovery is off (`-ne`) and the
 # crew's extension is named explicitly, which still loads. FOREMAN_CREW marks the
 # session for anything the crew starts later (see the guard in the extension).
+#
+# `-ne` also drops the packages the captain installed globally (settings.json
+# "packages"), and with them any model provider they bring - a crewModel such as
+# claude-bridge/... would not be found. So each installed global package is named
+# back explicitly, after the crew's own extension so the crew's tools register
+# first. Project-local packages and extensions stay off. See
+# foreman_pi_package_exts; it never fails a launch.
 CMD="env FOREMAN_CREW=$(printf '%q' "$ID") ${FOREMAN_PI_BIN:-pi} -ne"
 [ "$APPROVE" != 1 ] || CMD="$CMD --approve"
 CMD="$CMD -e $(printf '%q' "$EXT")"
+while IFS= read -r PKG; do
+  [ -z "$PKG" ] || [ "$PKG" = "$EXT" ] || CMD="$CMD -e $(printf '%q' "$PKG")"
+done <<EOF
+$(foreman_pi_package_exts)
+EOF
 [ -z "$MODEL" ] || CMD="$CMD --model $(printf '%q' "$MODEL")"
 [ -z "$THINKING" ] || CMD="$CMD --thinking $(printf '%q' "$THINKING")"
 CMD="$CMD $(printf '%q' "$POINTER")"

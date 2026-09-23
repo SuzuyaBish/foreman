@@ -101,8 +101,19 @@ relaunch)
   "$FOREMAN_ROOT/bin/crew-pi-ext.sh" "$ID" "$GEN" >/dev/null ||
     foreman_die "could not write the crew extension for '$ID'"
 
+  # The task's own record first; a task that never recorded one (spawned before
+  # crewModel was set, or by an older spawn) takes the current config, exactly as
+  # a fresh spawn would, and records it so the next relaunch is the same.
   MODEL=$(foreman_meta_get "$ID" model)
   THINKING=$(foreman_meta_get "$ID" thinking)
+  if [ -z "$MODEL" ]; then
+    MODEL=$(foreman_config_get crewModel || true)
+    [ -z "$MODEL" ] || foreman_meta_set "$ID" model "$MODEL"
+  fi
+  if [ -z "$THINKING" ]; then
+    THINKING=$(foreman_config_get crewThinking || true)
+    [ -z "$THINKING" ] || foreman_meta_set "$ID" thinking "$THINKING"
+  fi
   ARGS=()
   [ -z "$MODEL" ] || ARGS+=(--model "$MODEL")
   [ -z "$THINKING" ] || ARGS+=(--thinking "$THINKING")
