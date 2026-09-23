@@ -113,10 +113,10 @@ directly after the foreman's own workspace, with its seeded tab renamed
 glyph and that position *are* the hierarchy: the sidebar reads
 
 ```
-1 skills
+1 foreman
 2 └ parser-fix
-3 └ parser-fix
-4 Sample-Project
+3 └ sheet-render
+4 design-system
 ```
 
 It is presentation only, so it can never cost you a crew: if Herdr refuses the
@@ -132,7 +132,7 @@ queue; the widget is worst-first, shows how long ago each crew last reported, an
 colours each state with its theme role:
 
 ```
-1 decision · 1 failed · 1 review · 2 working · todo 3/12 Example_App
+1 decision · 1 failed · 1 review · 2 working · todo 3/12 notes-app
 
 c-authque        blocked  4m   [api] retry policy: fail fast or back off?
 c-ingest         failed   30m  no such host: registry.internal
@@ -148,7 +148,7 @@ toggles the widget.
 At session start the foreman is also handed one injected line, for example:
 
 ```
-crew digest: 3 crew (1 working, 1 blocked, 1 review) · 1 decision open · todo Example_App: 12 items (7 open, 0 active, 5 done)
+crew digest: 3 crew (1 working, 1 blocked, 1 review) · 1 decision open · todo notes-app: 12 items (7 open, 0 active, 5 done)
 ```
 
 It is read from the same records, injected into context without triggering a
