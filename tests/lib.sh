@@ -524,6 +524,18 @@ fm_gh_pr_state() {
     >"$GH_STUB_STATE/pr.json"
 }
 
+# fm_gh_pr_conflict <url> <file...> : configure `gh pr view` to report a merge
+# conflict, with the file paths the forge would list. The state fields are
+# included too, so a fixture built for the conflict path still answers the
+# callers that only ask about the pull request's state.
+fm_gh_pr_conflict() {
+  local url=$1
+  shift
+  jq -cn --arg url "$url" --args \
+    '{state:"OPEN",isDraft:false,mergedAt:null,url:$url,mergeable:"CONFLICTING",mergeStateStatus:"DIRTY",files:[$ARGS.positional[]|{path:.}]}' \
+    "$@" >"$GH_STUB_STATE/pr.json"
+}
+
 fm_gh_calls() { cat "$GH_STUB_STATE/calls" 2>/dev/null || true; }
 
 # --- fake pi ----------------------------------------------------------------
