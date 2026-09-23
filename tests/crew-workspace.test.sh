@@ -121,6 +121,7 @@ test_the_label_leads_with_the_item_number() {
   HERDR_WORKSPACE_ID=ws-parent7 HERDR_SESSION=default
   export HERDR_WORKSPACE_ID HERDR_SESSION
   fm_herdr_seed_workspace ws-parent7 skills
+  mkdir -p "$FOREMAN_PROJECTS/proj"
   "$BIN/crew-todo.sh" add --project proj "label the crew" >/dev/null
   seq=$(cut -f1 "$FOREMAN_HOME/todo.tsv" | tail -1)
 
@@ -139,6 +140,7 @@ test_the_board_supplies_the_number_without_a_flag() {
   HERDR_WORKSPACE_ID=ws-parent9 HERDR_SESSION=default
   export HERDR_WORKSPACE_ID HERDR_SESSION
   fm_herdr_seed_workspace ws-parent9 skills
+  mkdir -p "$FOREMAN_PROJECTS/proj"
   "$BIN/crew-todo.sh" add --project proj "board supplies the number" >/dev/null
   seq=$(cut -f1 "$FOREMAN_HOME/todo.tsv" | tail -1)
   "$BIN/crew-todo.sh" start "$seq" board-crew >/dev/null

@@ -154,7 +154,10 @@ const crewTodo = defineTool({
 		"Items are scoped by project: one harness serves many projects, and `list` and " +
 		"`proposals` read the scope in focus (the project of the newest crew, unless " +
 		"set), so work for one project never reads as another's. Pass `project` to file " +
-		"an item elsewhere, and `show: all` to see every scope grouped.",
+		"an item elsewhere, and `show: all` to see every scope grouped. A `project` " +
+		"name is resolved against the projects that exist, ignoring case and " +
+		"separators (`Habit_Tracker` is `habit-tracker`); a name that matches none is " +
+		"refused rather than filed as a scope of its own.",
 	parameters: Type.Object({
 		action: Type.String({
 			description: "add | propose | proposals | approve | list | start | done | open | drop",
@@ -178,7 +181,10 @@ const crewTodo = defineTool({
 			Type.String({
 				description:
 					"For add/propose: the project this work belongs to, e.g. the project name a " +
-					"crew was spawned into. Defaults to the scope in focus.",
+					"crew was spawned into. Case and separators are ignored (`Habit_Tracker` is " +
+					"`habit-tracker`) and an unknown name is refused. With no `project` the " +
+					"scope in focus is used, but with several projects registered and no focus " +
+					"set the add is refused so the project is named rather than guessed.",
 			}),
 		),
 		show: Type.Optional(

@@ -42,6 +42,9 @@
 # `--all` shows every scope grouped. The scope in focus is the one set by
 # `focus`, else the project of the newest crew (the work you were last doing),
 # else `foreman`. Focus is per session, so two sessions can watch two projects.
+# Writing that scope down is stricter than reading it: a `--project` must name a
+# project that exists, and an unscoped `add` takes the focus only when it is
+# not a guess (a set focus, or at most one project registered).
 set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"
@@ -58,10 +61,57 @@ todo_init() {
 todo_sanitize() { printf '%s' "$1" | tr '\t\n' '  '; }
 
 # --- scope ------------------------------------------------------------------
+#
+# A row's scope is free text, so a misspelling is not refused by the row format
+# and becomes a project of its own: the work it holds then reads around the real
+# project's board and only surfaces as `elsewhere` under a name the captain did
+# not choose. Scoping must never do that, so a scope is resolved to a project
+# that exists instead of being written down raw. `foreman` is the harness itself
+# and always exists; every other project is a directory under projects/. An
+# argument that matches one ignoring case and separators becomes that project;
+# anything else is refused, naming what is known, rather than inventing a scope.
 
-todo_scope_sane() { # <scope>
-  case "$1" in '' | *[!A-Za-z0-9._-]*) return 1 ;; esac
-  [ "$1" != "-" ]
+todo_scope_known() { # every project a scope may name, one per line
+  printf '%s\n' foreman
+  [ -d "$FOREMAN_PROJECTS" ] || return 0
+  local d name
+  for d in "$FOREMAN_PROJECTS"/*/; do
+    [ -d "$d" ] || continue
+    name=$(basename "$d")
+    case "$name" in .* | foreman) continue ;; esac
+    printf '%s\n' "$name"
+  done
+}
+
+todo_scope_key() { # <name> -> case and separators folded, locale independent
+  printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -d ' ._-'
+}
+
+todo_scope_resolve() { # <name> -> the project it names, or return 1
+  local want name key hit=''
+  want=$(todo_scope_key "${1:-}")
+  [ -n "$want" ] || return 1
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    key=$(todo_scope_key "$name")
+    [ "$key" = "$want" ] || continue
+    # Two projects that fold to one key cannot be told apart, so refusing is
+    # the only answer that cannot file the work under the wrong one.
+    [ -z "$hit" ] || return 1
+    hit=$name
+  done <<EOF
+$(todo_scope_known)
+EOF
+  [ -n "$hit" ] || return 1
+  printf '%s' "$hit"
+}
+
+todo_scope_named() { todo_scope_known | paste -sd, -; }
+
+todo_scope_arg() { # <name> -> the project it names, or die
+  local out
+  out=$(todo_scope_resolve "$1") || foreman_die "unknown project: $1 (known: $(todo_scope_named))"
+  printf '%s' "$out"
 }
 
 todo_project_of_crew() { # <crew-id> -> scope, or nothing
@@ -103,6 +153,29 @@ todo_scope() { # the scope the board reads now
   if [ -z "$s" ]; then s=$(todo_scope_newest); fi
   if [ -z "$s" ]; then s=foreman; fi
   printf '%s' "$s"
+}
+
+todo_project_count() { # how many projects are registered under projects/
+  local d n=0
+  [ -d "$FOREMAN_PROJECTS" ] || { printf 0; return 0; }
+  for d in "$FOREMAN_PROJECTS"/*/; do
+    [ -d "$d" ] || continue
+    case "$(basename "$d")" in .*) continue ;; esac
+    n=$((n + 1))
+  done
+  printf '%s' "$n"
+}
+
+todo_scope_for_write() { # the scope an unscoped add may take, or die
+  # A focus set with `focus` is the captain's own choice, not a guess, and
+  # keeps the documented default. Without one, the fallback is the newest
+  # crew's project, else `foreman` - and with more than one project registered
+  # that is a guess. Refuse and let the captain name the project rather than
+  # file work under a scope they did not mean.
+  if [ -z "$(todo_scope_explicit)" ] && [ "$(todo_project_count)" -gt 1 ]; then
+    foreman_die "no project named and more than one exists: pass --project <name> (known: $(todo_scope_named))"
+  fi
+  todo_scope
 }
 
 todo_lock() {
@@ -187,8 +260,7 @@ add | propose)
       ;;
     --project)
       [ $# -ge 2 ] || foreman_die "--project requires a name"
-      todo_scope_sane "$2" || foreman_die "bad project: $2 (letters, digits, . _ - only)"
-      SCOPE=$2
+      SCOPE=$(todo_scope_arg "$2")
       shift 2
       ;;
     *)
@@ -200,10 +272,11 @@ add | propose)
   TEXT=$(todo_sanitize "${PARTS[*]-}")
   [ -n "$TEXT" ] || foreman_die "usage: crew-todo.sh $ACTION [--note <text>] [--project <scope>] <text...>"
   todo_init
-  # No explicit project means the work belongs to whatever is in focus. The
-  # scope is written down at add time, so a later focus change never silently
-  # moves history into another project.
-  [ -n "$SCOPE" ] || SCOPE=$(todo_scope)
+  # An explicit project is resolved to a real project above. With none, the
+  # work belongs to the scope in focus only when that is not a guess: a set
+  # focus, or a home with at most one project. Otherwise the captain has to
+  # choose, so an item is never filed under a project they did not mean.
+  [ -n "$SCOPE" ] || SCOPE=$(todo_scope_for_write)
   # `add` is the captain's request and goes straight on the board. `propose`
   # is the foreman's own suggestion: it is filed apart, with its reason in the
   # note field, and waits for `approve` before it becomes the captain's work.
@@ -247,8 +320,7 @@ proposals)
     --all) SCOPE="*" ;;
     --project)
       [ $# -ge 2 ] || foreman_die "--project requires a name"
-      todo_scope_sane "$2" || foreman_die "bad project: $2 (letters, digits, . _ - only)"
-      SCOPE=$2
+      SCOPE=$(todo_scope_arg "$2")
       shift
       ;;
     *) foreman_die "unknown proposals option: $1" ;;
@@ -335,7 +407,7 @@ focus)
     printf 'focus cleared (now %s)\n' "$(todo_scope)"
     ;;
   *)
-    todo_scope_sane "$SCOPE" || foreman_die "bad scope: $SCOPE (letters, digits, . _ - only)"
+    SCOPE=$(todo_scope_arg "$SCOPE")
     printf '%s\n' "$SCOPE" >"$(todo_focus_file)"
     printf 'focus %s\n' "$SCOPE"
     ;;
@@ -399,8 +471,7 @@ summary)
     --all) ALL=1 ;;
     --project)
       [ $# -ge 2 ] || foreman_die "--project requires a name"
-      todo_scope_sane "$2" || foreman_die "bad project: $2 (letters, digits, . _ - only)"
-      SCOPE=$2
+      SCOPE=$(todo_scope_arg "$2")
       shift
       ;;
     *) foreman_die "unknown summary option: $1" ;;
@@ -466,8 +537,7 @@ list)
     --no-notes) NOTES=0 ;;
     --project)
       [ $# -ge 2 ] || foreman_die "--project requires a name"
-      todo_scope_sane "$2" || foreman_die "bad project: $2 (letters, digits, . _ - only)"
-      SCOPE=$2
+      SCOPE=$(todo_scope_arg "$2")
       shift
       ;;
     *) foreman_die "unknown list option: $1" ;;

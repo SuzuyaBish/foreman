@@ -74,6 +74,7 @@ test_todo_counts() {
 # project's backlog as this one's - nor hide work that is queued elsewhere.
 test_todo_scoped() {
   local out
+  mkdir -p "$FOREMAN_PROJECTS/Example_App"
   "$BIN/crew-todo.sh" add --project Example_App "sheet background" >/dev/null
   "$BIN/crew-todo.sh" focus Example_App >/dev/null
   out=$("$DIGEST")

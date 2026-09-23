@@ -331,8 +331,13 @@ own backlog lives under `foreman` instead of crowding it out.
 
 Work in another scope - queued or in flight - is counted rather than hidden,
 named by the status it is in, and `show: all` groups every scope under its own
-heading. Adding an item without a project files it in the scope in focus. Placing a crew for a project puts that project in focus,
-so the board follows the work without you saying so twice.
+heading. Adding an item without a project files it in the scope in focus when
+that focus was set with `focus`; otherwise, with more than one project
+registered, the add is refused and the projects are listed. A `--project` name is
+checked against the projects that exist - case and separators are ignored
+(`Habit_Tracker` is `habit-tracker`), and a name matching none is refused rather
+than filed as a scope of its own. Placing a crew for a project puts that project
+in focus, so the board follows the work without you saying so twice.
 
 The board is yours. Ask for something and it goes straight on. The foreman never
 puts anything there on its own initiative: an idea it notices while working
