@@ -145,6 +145,19 @@ todo_crew_state() { # <crew-id>
   foreman_status_get "$1" state
 }
 
+# Did this crew ever report `done`? Its live state is folded from the events log
+# and a later stop, pane death, or lost-endpoint sweep overwrites it with
+# `stopped`/`failed`, which is correct for the process but wrong for the work:
+# the append-only log still carries the delivery. `done` is terminal for the row
+# (see the sync comment below), so a delivered item is never reopened just
+# because the crew that delivered it later stopped.
+todo_crew_reached_done() { # <crew-id>
+  local events
+  events="$(foreman_task_dir "$1")/events"
+  [ -f "$events" ] || return 1
+  awk -F'\t' '$2 == "done" { found = 1 } END { exit found ? 0 : 1 }' "$events"
+}
+
 ACTION=${1:-list}
 case "$ACTION" in
 add)
@@ -263,12 +276,25 @@ sync)
     # in between: a reopen after a failed crew must still settle when a relaunch
     # succeeds, and a manual `open` of running work is not a way to detach it.
     # `done` and `dropped` are terminal for the row and are never resurrected.
+    #
+    # The live state alone is not enough to follow a crew. Stopping a finished
+    # crew, killing its pane, or sweeping a lost endpoint appends `stopped` or
+    # `failed` over a state that had already reached `done`, and a mapping that
+    # read only the current state would reopen delivered work. `done` is terminal
+    # in the append-only log too, so a row whose crew ever reported it stays done;
+    # only a crew that never delivered reopens when its process dies.
     if [ -n "$crew" ] && [ "$crew" != "-" ] && [ "$status" != done ] && [ "$status" != dropped ]; then
       cs=$(todo_crew_state "$crew")
       case "$cs" in
       done) status=done ;;
       working | review | blocked | queued) status=active ;;
-      failed | lost | stopped | gone) status=open ;;
+      failed | lost | stopped | gone)
+        if todo_crew_reached_done "$crew"; then
+          status=done
+        else
+          status=open
+        fi
+        ;;
       esac
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$seq" "$status" "$crew" "$text" "$note" "$scope"

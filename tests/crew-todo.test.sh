@@ -12,6 +12,10 @@ fm_home >/dev/null
 
 TODO="$BIN/crew-todo.sh"
 
+# Add an item and print its sequence, so a test never hard-codes a number an
+# earlier test has already advanced.
+add_item() { "$TODO" add "$@" | sed -n 's/^added #\([0-9][0-9]*\).*/\1/p'; }
+
 test_add_and_sequence() {
   local out
   out=$("$TODO" add "first item")
@@ -129,6 +133,48 @@ test_sync_follows_the_crew() {
   pass "sync reconciles intent against live crew state without resurrecting terminal rows"
 }
 
+# The bug: stopping a finished crew reopened its delivered item. The crew's
+# live state records the pane death, but the append-only log still carries the
+# `done`, and `done` is terminal for the row.
+test_sync_keeps_a_delivered_crew_done() {
+  local s_stop s_lost s_work s_relaunch out
+  fm_task delivered-stop stopped >/dev/null
+  printf 'x\tdone\t\tmerged by the foreman: https://example.test/o/r/pull/2\n' \
+    >>"$FOREMAN_HOME/tasks/delivered-stop/events"
+  fm_task delivered-lost failed >/dev/null
+  printf 'x\tdone\t\tfinished\nx\tfailed\t\tendpoint gone: the recorded pane no longer exists\n' \
+    >>"$FOREMAN_HOME/tasks/delivered-lost/events"
+  fm_task unfinished-stop stopped >/dev/null
+  fm_task relaunched done >/dev/null
+  printf 'x\tfailed\t\tfirst attempt\nx\tworking\t\trelaunched\nx\tdone\t\tfinished on the second try\n' \
+    >>"$FOREMAN_HOME/tasks/relaunched/events"
+
+  s_stop=$(add_item "delivered then stopped")
+  s_lost=$(add_item "delivered then lost")
+  s_work=$(add_item "unfinished then stopped")
+  s_relaunch=$(add_item "failed then relaunched")
+
+  "$TODO" start "$s_stop" delivered-stop >/dev/null
+  "$TODO" start "$s_lost" delivered-lost >/dev/null
+  "$TODO" start "$s_work" unfinished-stop >/dev/null
+  "$TODO" start "$s_relaunch" relaunched >/dev/null
+
+  row_state() { printf '%s\n' "$1" | awk -v s="$2" '$1 == s { print $2 }'; }
+  "$TODO" sync >/dev/null
+  out=$("$TODO" list --all)
+  assert_equals "done" "$(row_state "$out" "$s_stop")" "a stopped crew that had reported done keeps its item done"
+  assert_equals "done" "$(row_state "$out" "$s_lost")" "a crew that lost its pane after done keeps its item done"
+  assert_equals "open" "$(row_state "$out" "$s_work")" "a stopped crew that never delivered reopens its item"
+  assert_equals "done" "$(row_state "$out" "$s_relaunch")" "a failed crew that relaunches to done settles its item"
+
+  # Sticky across a second sync, exactly as the captain saw it: the crew is
+  # still stopped, and the item must still be done.
+  "$TODO" sync >/dev/null
+  out=$("$TODO" list --all)
+  assert_equals "done" "$(row_state "$out" "$s_stop")" "a delivered item stays done across syncs"
+  pass "a delivered item is never reopened by the crew's later process death"
+}
+
 test_summary() {
   local out
   out=$("$TODO" summary)
@@ -235,6 +281,7 @@ test_note_updates_in_place
 test_sanitize_protects_the_row_format
 test_start_done_open_drop
 test_sync_follows_the_crew
+test_sync_keeps_a_delivered_crew_done
 test_summary
 test_scopes_keep_projects_apart
 test_focus_follows_the_newest_crew
