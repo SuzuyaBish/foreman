@@ -44,6 +44,17 @@ test_refuses_without_a_next() {
   pass "a prescription needs a diagnosed next step"
 }
 
+test_refuses_a_whitespace_only_next() {
+  "$AREA" add blankish --kind repo >/dev/null
+  "$NEXT" blankish '   ' >/dev/null
+  local rc
+  "$PRESCRIBE" blankish >/dev/null 2>"$ERRF"
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a whitespace-only next was prescribed"
+  assert_contains "$(cat "$ERRF")" "no diagnosed next step" "whitespace is refused like no next"
+  pass "a whitespace-only next cannot diagnose an empty step"
+}
+
 test_stdout_is_paste_ready() {
   "$AREA" add atlas --title "Atlas" --kind repo --where "~/code/atlas" >/dev/null
   "$NOTE" atlas --status "parser merged; flags half done" "closed the parser PR" >/dev/null
@@ -135,6 +146,7 @@ test_outbox_collisions_do_not_overwrite() {
 }
 
 test_refuses_without_a_next
+test_refuses_a_whitespace_only_next
 test_stdout_is_paste_ready
 test_stdout_skips_the_outbox
 test_delivery_follows_the_kind

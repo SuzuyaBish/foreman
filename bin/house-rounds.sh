@@ -78,7 +78,7 @@ for slug in $slugs; do
   kind=$(house_field "$path" kind)
   updated=$(house_field "$path" updated)
   status=$(house_field "$path" status)
-  next=$(house_field "$path" next)
+  next=$(house_trim "$(house_field "$path" next)")
 
   marks=
   age=$(house_age_days "$path" 2>/dev/null || printf '')

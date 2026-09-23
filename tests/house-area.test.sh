@@ -89,6 +89,68 @@ test_note_and_next() {
   pass "a note is dated, and one note can carry status and next"
 }
 
+test_backslash_is_literal() {
+  "$AREA" add esc --kind repo >/dev/null
+  "$NEXT" esc 'C:\new\table' >/dev/null
+  assert_equals 'C:\new\table' "$(field "$AREAS/esc.md" next)" "a backslash value is stored literally"
+  pass "a backslash is a backslash, not an escape"
+}
+
+test_newline_cannot_inject_a_field() {
+  local rc
+  "$AREA" add inject --kind repo --title "$(printf 'Innocent\nnext: pwned')" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a title with a newline was accepted"
+  assert_absent "$AREAS/inject.md" "a rejected add writes no chart"
+  "$NEXT" esc "ok" >/dev/null
+  "$NOTE" esc --status "$(printf 'fine\nnext: pwned')" "a note" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a status with a newline was accepted"
+  assert_not_contains "$(cat "$AREAS/esc.md")" "pwned" "the injected field never landed"
+  rm -f "$AREAS/esc.md"
+  pass "a newline in a field value is refused, not written"
+}
+
+test_a_rejected_note_writes_nothing() {
+  "$AREA" add atomic --kind repo >/dev/null
+  local before rc n
+  before=$(cat "$AREAS/atomic.md")
+  "$NOTE" atomic --status "$(printf 'bad\nstatus: x')" "the note text" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a newline status was accepted"
+  assert_equals "$before" "$(cat "$AREAS/atomic.md")" "a rejected note leaves the chart untouched"
+  assert_not_contains "$(cat "$AREAS/atomic.md")" "the note text" "the note text was not half-written"
+  n=$(find "$AREAS" -name 'atomic.md.tmp.*' | wc -l | tr -d ' ')
+  assert_equals "0" "$n" "no temp file is left behind"
+  rm -f "$AREAS/atomic.md"
+  pass "a rejected note is all-or-nothing, with no temp left"
+}
+
+test_duplicate_fields_heal_on_write() {
+  "$AREA" add dup --kind repo >/dev/null
+  printf 'status: first\nstatus: second\n' >>"$AREAS/dup.md"
+  "$NOTE" dup --status 'the one' 'a note' >/dev/null
+  local n
+  n=$(grep -c '^status:' "$AREAS/dup.md")
+  assert_equals "1" "$n" "a duplicate field is dropped on the next write"
+  assert_equals "the one" "$(field "$AREAS/dup.md" status)" "the surviving field is the new value"
+  rm -f "$AREAS/dup.md"
+  pass "a hand-edited duplicate field heals on the next write"
+}
+
+test_concurrent_notes_do_not_lose_appends() {
+  "$AREA" add race --kind repo >/dev/null
+  local i n
+  for i in $(seq 1 40); do
+    "$NOTE" race "n$i" >/dev/null 2>&1 &
+  done
+  wait
+  n=$(grep -c '^- ' "$AREAS/race.md")
+  assert_equals "40" "$n" "all concurrent appends survive the single writer"
+  rm -f "$AREAS/race.md"
+  pass "concurrent notes cannot lose each other's log line"
+}
+
 test_archive_retires_but_keeps() {
   local out
   out=$("$AREA" archive atlas)
@@ -109,4 +171,9 @@ test_add_creates_a_chart
 test_list_and_show
 test_refusals
 test_note_and_next
+test_backslash_is_literal
+test_newline_cannot_inject_a_field
+test_a_rejected_note_writes_nothing
+test_duplicate_fields_heal_on_write
+test_concurrent_notes_do_not_lose_appends
 test_archive_retires_but_keeps

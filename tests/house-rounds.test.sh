@@ -61,6 +61,15 @@ test_no_next_is_marked() {
   pass "an area with no next is marked, not hidden"
 }
 
+test_whitespace_next_is_not_a_next() {
+  "$NEXT" expo-talk '   ' >/dev/null
+  local out
+  out=$("$ROUNDS")
+  assert_contains "$out" "1 no next" "a whitespace-only next still counts as none"
+  assert_contains "$out" "[no next]" "a whitespace-only next is marked"
+  pass "whitespace cannot defeat the no-next guard"
+}
+
 test_stale_bound_is_configurable() {
   local out
   out=$("$ROUNDS" --stale-days 1)
@@ -97,6 +106,7 @@ test_all_includes_archived() {
 test_empty
 test_marks_no_next_and_stale
 test_no_next_is_marked
+test_whitespace_next_is_not_a_next
 test_stale_bound_is_configurable
 test_digest_is_one_line
 test_all_includes_archived

@@ -87,6 +87,13 @@ add)
   done
   house_slug_ok "$SLUG" || house_die "bad area slug: $SLUG (lowercase letters, digits and dashes; max 32)"
   house_kind_ok "$KIND" || house_die "bad area kind: $KIND (one of: $HOUSE_KINDS)"
+  # Every value must be one line before it is printed into the chart, or a
+  # title carrying a newline could inject a field.
+  TITLE=$(house_sanitize_field title "$TITLE")
+  WHERE=$(house_sanitize_field where "$WHERE")
+  BIND=$(house_sanitize_field bind "$BIND")
+  STATUS=$(house_sanitize_field status "$STATUS")
+  NEXT=$(house_sanitize_field next "$NEXT")
   house_find_area "$SLUG" >/dev/null 2>&1 && house_die "area already exists: $SLUG (use show or note)"
   mkdir -p "$HOUSE_AREAS"
   path=$(house_area_path "$SLUG")

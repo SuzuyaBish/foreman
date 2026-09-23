@@ -74,37 +74,145 @@ house_require_area() {
 }
 
 # One header field, or nothing. Anchored so a log line can never answer for a
-# field.
+# field, and only the first when a hand-edited chart carries a duplicate.
 house_field() { # <path> <key>
   sed -n "s/^$2: //p" "$1" 2>/dev/null | head -n 1
 }
 
-# Replace a header field in place, inserting it before "## Log" when the chart
-# does not have it yet (a hand-edited or hand-written chart). Atomic via a
-# temp file and mv, so a reader never sees half a chart.
-house_set_field() { # <path> <key> <value>
-  local path=$1 key=$2 value=$3 tmp
-  tmp="$path.tmp.$$"
-  awk -v key="$key" -v val="$value" '
-    BEGIN { done = 0; seen_log = 0 }
-    {
-      if (index($0, key ":") == 1) { print key ": " val; done = 1; next }
-      if (!seen_log && $0 ~ /^## Log/) {
-        if (!done) { print key ": " val; done = 1 }
-        seen_log = 1
-      }
-      print
-    }
-    END { if (!done) print key ": " val }
-  ' "$path" >"$tmp" && mv "$tmp" "$path"
+# Chart fields are one physical line each. A value carrying a newline or tab
+# would inject a second field or split the log, so every path that writes a
+# field runs the value through here first. A carriage return is refused with
+# them: a CRLF value would otherwise read back with a trailing CR.
+house_sanitize_field() { # <key> <value> -> prints the value, or dies
+  local key=${1:-field} value=${2-}
+  case "$value" in
+  *$'\n'* | *$'\t'* | *$'\r'*)
+    house_die "$key must be one line (no newline, carriage return or tab)"
+    ;;
+  esac
+  printf '%s' "$value"
 }
 
-# Append a dated line to the log, ending with a newline even if the file did
-# not.
-house_log_append() { # <path> <date> <text>
-  local path=$1 date=$2 text=$3
-  [ -z "$(tail -c 1 "$path" 2>/dev/null)" ] || printf '\n' >>"$path"
-  printf -- '- %s - %s\n' "$date" "$text" >>"$path"
+# A log line is one line too, but a note is prose: flatten rather than refuse,
+# so a multi-line thought still charts as one dated line.
+house_flatten_log() { # <text>
+  printf '%s' "${1-}" | tr '\t\r\n' '   '
+}
+
+# Whitespace with nothing in it is not a next step. Fold it to empty before any
+# guard tests it, so `[no next]` and prescribe's check cannot be defeated by
+# spaces.
+house_trim() { # <text>
+  printf '%s' "${1-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# One writer per chart, the same mkdir primitive crew-send.sh uses for the
+# inbox: atomic everywhere that matters, and it gives up rather than wait
+# forever behind a writer that died holding it.
+house_lock_acquire() { # <lock-dir>
+  local i
+  for i in $(seq 1 400); do
+    mkdir "$1" 2>/dev/null && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+# The one writer. Every field set and every log append goes through here, under
+# a per-chart lock, rewriting the whole chart with a temp and mv so no reader
+# ever sees it half-written and no writer can lose another's append. Values
+# reach awk through a tab-separated directives file, never `-v`, so a backslash
+# stays a backslash instead of becoming an escape. A key's first line is
+# replaced and its later duplicates dropped, so a hand-edited duplicate heals
+# on the next write. Missing fields go before "## Log", or before the first log
+# line, or a "## Log" header is created; the log lines are appended last.
+house_edit() { # <path> [--set <key> <value>]... [--log <date> <text>]...
+  local path=$1
+  shift
+  [ -f "$path" ] || house_die "no such chart: $path"
+
+  local dirs tmp lock
+  dirs=$(mktemp "${TMPDIR:-/tmp}/house-edit.XXXXXX") || house_die "could not stage chart edits"
+  tmp="$path.tmp.$$"
+  lock="$path.lock"
+  # shellcheck disable=SC2064 # expand the temp names now, not at trap time
+  trap 'rm -rf "$lock" "$tmp" "$dirs"' EXIT
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    --set)
+      [ $# -ge 3 ] || house_die "internal: house_edit --set needs a key and a value"
+      local sval
+      # Capture first: a command substitution inside printf would swallow the
+      # sanitizer's failure and write a half-checked directive.
+      sval=$(house_sanitize_field "$2" "$3") || exit 1
+      printf 'S\t%s\t%s\n' "$2" "$sval" >>"$dirs"
+      shift 3
+      ;;
+    --log)
+      [ $# -ge 3 ] || house_die "internal: house_edit --log needs a date and text"
+      local lval
+      lval=$(house_flatten_log "$3") || exit 1
+      printf 'L\t%s\t%s\n' "$2" "$lval" >>"$dirs"
+      shift 3
+      ;;
+    *)
+      house_die "internal: bad house_edit operation: $1"
+      ;;
+    esac
+  done
+
+  house_lock_acquire "$lock" || house_die "could not lock chart $path (another writer is busy)"
+
+  if ! awk -F '\t' '
+    FILENAME == ARGV[1] {
+      if ($1 == "S") { skey[$2] = $3; if (!($2 in order)) order[++n] = $2 }
+      else if ($1 == "L") { ldate[++m] = $2; ltext[m] = $3 }
+      next
+    }
+    {
+      isfield = ""
+      for (i = 1; i <= n; i++) {
+        k = order[i]
+        if (index($0, k ":") == 1) { isfield = k; break }
+      }
+      if (isfield != "") {
+        if (!(isfield in placed)) { print isfield ": " skey[isfield]; placed[isfield] = 1 }
+        next
+      }
+      is_header = ($0 ~ /^## Log/) ? 1 : 0
+      is_log = ($0 ~ /^- /) ? 1 : 0
+      if (!inserted && (is_header || is_log)) {
+        for (i = 1; i <= n; i++) {
+          k = order[i]
+          if (!(k in placed)) { print k ": " skey[k]; placed[k] = 1 }
+        }
+        if (!header_seen && !is_header) { print ""; print "## Log"; emitted_header = 1 }
+        inserted = 1
+      }
+      if (is_header) { header_seen = 1; emitted_header = 1 }
+      print
+    }
+    END {
+      if (!inserted) {
+        for (i = 1; i <= n; i++) {
+          k = order[i]
+          if (!(k in placed)) { print k ": " skey[k]; placed[k] = 1 }
+        }
+      }
+      if (m > 0) {
+        if (!emitted_header) { print ""; print "## Log" }
+        for (i = 1; i <= m; i++) print "- " ldate[i] " - " ltext[i]
+      }
+    }
+  ' "$dirs" "$path" >"$tmp"; then
+    house_die "could not write chart $path"
+  fi
+
+  mv "$tmp" "$path"
+  rm -rf "$lock"
+  rm -f "$dirs"
+  trap - EXIT
 }
 
 house_today() { date +%Y-%m-%d; }

@@ -80,7 +80,7 @@ KIND=$(house_field "$path" kind)
 WHERE=$(house_field "$path" where)
 UPDATED=$(house_field "$path" updated)
 STATUS=$(house_field "$path" status)
-NEXT=$(house_field "$path" next)
+NEXT=$(house_trim "$(house_field "$path" next)")
 
 [ -n "$NEXT" ] || house_die "area $SLUG has no diagnosed next step; run: house-next.sh $SLUG <step>"
 [ -n "$TITLE" ] || TITLE=$SLUG
