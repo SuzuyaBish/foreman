@@ -486,6 +486,12 @@ Two lines on each area are the ones that matter:
 Everything else in the file is a dated log of what changed. Keeping those two
 lines honest is the whole job of the chart.
 
+`updated` is **last-write, not last-verified**: it moves when the chart is
+written to (`note`, `next`), never when something is re-checked. A status claim
+— a commit sha, a branch, a PR — can therefore read fresh while being wrong,
+and a round ages the chart you last touched, not the state you last confirmed.
+Re-reading the claim is part of acting on it.
+
 ### The loop, step by step
 
 House only ever does four things, and never any of them on its own:

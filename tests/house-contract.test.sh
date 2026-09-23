@@ -13,6 +13,14 @@ fm_home >/dev/null
 README="$ROOT/README.md"
 EXT="$ROOT/.pi/extensions/foreman.ts"
 
+test_staleness_is_documented_as_last_write() {
+  local phrase="last-write, not last-verified"
+  assert_grep "$phrase" "$README" "the README says what updated means"
+  assert_grep "$phrase" "$ROOT/HOUSE.md" "HOUSE.md says what updated means"
+  assert_grep "$phrase" "$ROOT/.pi/skills/house/SKILL.md" "the house skill says what updated means"
+  pass "staleness is documented as last-write, not last-verified"
+}
+
 test_the_table_is_there() {
   local rows
   rows=$(grep -E '^\| `bin/house-[a-z-]+\.sh` \|' "$README" || true)
@@ -78,3 +86,4 @@ test_every_documented_script_exists_and_documents_its_verbs
 test_every_house_script_is_documented
 test_every_documented_tool_is_registered
 test_house_mode_is_wired
+test_staleness_is_documented_as_last_write

@@ -94,6 +94,7 @@ test_stdout_is_paste_ready() {
   assert_contains "$out" "Diagnosed next step:" "the prompt labels the step"
   assert_contains "$out" "add --dry-run and a test for it" "the step is the chart's"
   assert_contains "$out" "Standing conventions:" "the conventions are included"
+  assert_contains "$out" "last write, not the last verification" "the prompt tells the session to re-check the status claim"
   assert_contains "$out" "pull request" "a repo area is delivered as a PR"
   assert_contains "$err" "wrote" "the outbox path is reported on stderr"
   assert_present "$OUTBOX/atlas-"*.md "the prompt landed in the outbox"

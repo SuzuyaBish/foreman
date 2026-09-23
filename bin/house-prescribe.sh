@@ -151,7 +151,9 @@ Standing conventions:
 Delivery:
 $DELIVERY
 
-Start with the next step above. If it is wrong or already done, say so before
+Start with the next step above. Before you do, re-check the status claim above:
+`updated` marks the last write, not the last verification, so a claim can read
+fresh while being wrong. If it is wrong or already done, say so before
 improvising a different one.
 $CONTEXT_BLOCK
 EOF
