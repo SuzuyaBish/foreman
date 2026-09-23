@@ -29,6 +29,11 @@ Starts `pi` in this directory with the crew tools loaded. The first thing you
 type is a message to your foreman. You never run the other commands below by
 hand unless you want to.
 
+Every session starts the same way: the foreman reads `foreman/HANDOFF.md` (the
+standing architecture and traps) and then `crew_todo` (the durable plan), as
+`AGENTS.md` instructs. It is also handed a one-line `crew digest:` and, once,
+the previous session's dated handoff note — both orientation, not the plan.
+
 ```
 > clone the repos I work on into projects/ for me, using gh
 
