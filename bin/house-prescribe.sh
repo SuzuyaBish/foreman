@@ -25,15 +25,19 @@ does not fail when none is available. --stdout skips the outbox write.
 EOF
 }
 
-house_clip_copy() { # stdin -> clipboard, nonzero when no tool is available
+house_clip_copy() { # stdin -> clipboard; 127 when no tool exists, else the tool's code
+  HOUSE_CLIP_TOOL=
   if command -v pbcopy >/dev/null 2>&1; then
+    HOUSE_CLIP_TOOL=pbcopy
     pbcopy
   elif command -v xclip >/dev/null 2>&1; then
+    HOUSE_CLIP_TOOL=xclip
     xclip -selection clipboard
   elif command -v wl-copy >/dev/null 2>&1; then
+    HOUSE_CLIP_TOOL=wl-copy
     wl-copy
   else
-    return 1
+    return 127
   fi
 }
 
@@ -45,7 +49,7 @@ case "${1:-}" in
 esac
 
 SLUG=${1:-}
-[ -n "$SLUG" ] || foreman_die "usage: house-prescribe.sh <slug> [--copy] [--stdout] [--context FILE]"
+[ -n "$SLUG" ] || house_die "usage: house-prescribe.sh <slug> [--copy] [--stdout] [--context FILE]"
 shift
 
 COPY=0
@@ -62,11 +66,11 @@ while [ $# -gt 0 ]; do
     shift
     ;;
   --context)
-    [ $# -ge 2 ] || foreman_die "--context requires a file"
+    [ $# -ge 2 ] || house_die "--context requires a file"
     CONTEXT=$2
     shift 2
     ;;
-  *) foreman_die "unknown prescribe option: $1 (try --help)" ;;
+  *) house_die "unknown prescribe option: $1 (try --help)" ;;
   esac
 done
 
@@ -78,7 +82,7 @@ UPDATED=$(house_field "$path" updated)
 STATUS=$(house_field "$path" status)
 NEXT=$(house_field "$path" next)
 
-[ -n "$NEXT" ] || foreman_die "area $SLUG has no diagnosed next step; run: house-next.sh $SLUG <step>"
+[ -n "$NEXT" ] || house_die "area $SLUG has no diagnosed next step; run: house-next.sh $SLUG <step>"
 [ -n "$TITLE" ] || TITLE=$SLUG
 [ -n "$KIND" ] || KIND=other
 [ -n "$WHERE" ] || WHERE="not recorded"
@@ -87,7 +91,7 @@ NEXT=$(house_field "$path" next)
 
 CONTEXT_BLOCK=""
 if [ -n "$CONTEXT" ]; then
-  [ -f "$CONTEXT" ] || foreman_die "no such context file: $CONTEXT"
+  [ -f "$CONTEXT" ] || house_die "no such context file: $CONTEXT"
   CONTEXT_BLOCK=$(cat <<EOF
 
 Extra context (from $CONTEXT):
@@ -169,7 +173,13 @@ if [ "$COPY" -eq 1 ]; then
   if house_clip_copy <"$tmp"; then
     printf 'house: copied to clipboard\n' >&2
   else
-    printf 'house: no clipboard tool (pbcopy, xclip, wl-copy) on PATH; the prescription is above\n' >&2
+    clip_rc=$?
+    if [ "$clip_rc" -eq 127 ]; then
+      printf 'house: no clipboard tool (pbcopy, xclip, wl-copy) on PATH; the prescription is above\n' >&2
+    else
+      printf 'house: clipboard tool %s failed (exit %s); the prescription is above\n' \
+        "${HOUSE_CLIP_TOOL:-?}" "$clip_rc" >&2
+    fi
   fi
 fi
 

@@ -78,11 +78,11 @@ seed() {
   while [ $# -gt 0 ]; do
     case "$1" in
     --bind)
-      [ $# -ge 2 ] || foreman_die "--bind requires a value"
+      [ $# -ge 2 ] || house_die "--bind requires a value"
       bind=$2
       shift 2
       ;;
-    *) foreman_die "unknown seed option: $1 (try --help)" ;;
+    *) house_die "unknown seed option: $1 (try --help)" ;;
     esac
   done
 
@@ -96,7 +96,7 @@ seed() {
     house_demo_marked "$path" || refused="$refused $slug"
   done
   if [ -n "$refused" ]; then
-    foreman_die "refusing to overwrite non-demo area(s):$refused (they lack the '$HOUSE_DEMO_MARKER' marker)"
+    house_die "refusing to overwrite non-demo area(s):$refused (they lack the '$HOUSE_DEMO_MARKER' marker)"
   fi
 
   local stale
@@ -180,10 +180,10 @@ case "$ACTION" in
   ;;
 seed) seed "$@" ;;
 clear)
-  [ $# -eq 0 ] || foreman_die "usage: house-demo.sh clear"
+  [ $# -eq 0 ] || house_die "usage: house-demo.sh clear"
   clear
   ;;
 *)
-  foreman_die "usage: house-demo.sh seed [--bind <crew-id>] | clear (try --help)"
+  house_die "usage: house-demo.sh seed [--bind <crew-id>] | clear (try --help)"
   ;;
 esac

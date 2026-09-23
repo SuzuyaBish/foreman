@@ -25,6 +25,14 @@ HOUSE_OUTBOX="$HOUSE_DIR/outbox"
 # thread with no repository (deliver a report).
 HOUSE_KINDS="repo chat deck craft other"
 
+# House speaks as House, never as the foreman: a refusal from a house script
+# must not name a different persona. `FOREMAN_MODE=house` is the launcher's
+# marker, but the voice is House's regardless of how the script was reached.
+house_die() {
+  printf 'house: %s\n' "$*" >&2
+  exit 1
+}
+
 house_slug_ok() { foreman_valid_id "${1:-}"; }
 
 house_kind_ok() {
@@ -58,10 +66,10 @@ house_find_area() {
 # The active chart for a slug, or die. Diagnostics and prescribing only ever
 # act on an active area; `show` is the one verb that also reads the archived.
 house_require_area() {
-  house_slug_ok "${1:-}" || foreman_die "bad area slug: ${1:-<none>} (lowercase letters, digits and dashes; max 32)"
+  house_slug_ok "${1:-}" || house_die "bad area slug: ${1:-<none>} (lowercase letters, digits and dashes; max 32)"
   local p
   p=$(house_area_path "$1")
-  [ -f "$p" ] || foreman_die "no such area: $1"
+  [ -f "$p" ] || house_die "no such area: $1"
   printf '%s' "$p"
 }
 

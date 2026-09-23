@@ -41,14 +41,14 @@ while [ $# -gt 0 ]; do
     shift
     ;;
   --stale-days)
-    [ $# -ge 2 ] || foreman_die "--stale-days requires a number"
+    [ $# -ge 2 ] || house_die "--stale-days requires a number"
     case "$2" in
-    '' | *[!0-9]*) foreman_die "--stale-days requires a whole number of days" ;;
+    '' | *[!0-9]*) house_die "--stale-days requires a whole number of days" ;;
     esac
     STALE_DAYS=$2
     shift 2
     ;;
-  *) foreman_die "unknown rounds option: $1 (try --help)" ;;
+  *) house_die "unknown rounds option: $1 (try --help)" ;;
   esac
 done
 

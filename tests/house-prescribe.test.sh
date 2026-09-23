@@ -16,6 +16,23 @@ PRESCRIBE="$BIN/house-prescribe.sh"
 OUTBOX="$FOREMAN_HOME/house/outbox"
 ERRF="$FOREMAN_HOME/prescribe.err"
 
+test_copy_reports_a_failing_clipboard() {
+  fm_fakebin
+  cat >"$FM_FAKEBIN/pbcopy" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+exit 1
+SH
+  chmod +x "$FM_FAKEBIN/pbcopy"
+  local rc
+  "$PRESCRIBE" atlas --stdout --copy >/dev/null 2>"$ERRF"
+  rc=$?
+  expect_code 0 "$rc" "a failing clipboard tool is not an error"
+  assert_contains "$(cat "$ERRF")" "failed" "a tool that exists but failed is distinguished"
+  assert_not_contains "$(cat "$ERRF")" "no clipboard tool" "a failure is not reported as a missing tool"
+  pass "--copy tells a missing clipboard from a failing one"
+}
+
 test_refuses_without_a_next() {
   "$AREA" add blank --kind repo >/dev/null
   local rc
@@ -124,4 +141,5 @@ test_delivery_follows_the_kind
 test_context_is_appended
 test_copy_uses_a_clipboard_when_present
 test_copy_degrades_without_a_clipboard
+test_copy_reports_a_failing_clipboard
 test_outbox_collisions_do_not_overwrite

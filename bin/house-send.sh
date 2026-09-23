@@ -31,7 +31,7 @@ case "${1:-}" in
 esac
 
 SLUG=${1:-}
-[ -n "$SLUG" ] || foreman_die "usage: house-send.sh <slug> [--yes]"
+[ -n "$SLUG" ] || house_die "usage: house-send.sh <slug> [--yes]"
 shift
 
 YES=0
@@ -41,14 +41,14 @@ while [ $# -gt 0 ]; do
     YES=1
     shift
     ;;
-  *) foreman_die "unknown send option: $1 (try --help)" ;;
+  *) house_die "unknown send option: $1 (try --help)" ;;
   esac
 done
 
 path=$(house_require_area "$SLUG")
 BIND=$(house_field "$path" bind)
 if [ -z "$BIND" ]; then
-  foreman_die "area $SLUG has no bind; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
+  house_die "area $SLUG has no bind; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
 fi
 
 # A bind names a crew task, optionally with a `crew:` prefix. Anything else is
@@ -57,16 +57,16 @@ TARGET=${BIND#crew:}
 TARGET=${TARGET#task:}
 case "$TARGET" in
 '' | *[!abcdefghijklmnopqrstuvwxyz0123456789-]*)
-  foreman_die "bind '$BIND' is not a crew task; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
+  house_die "bind '$BIND' is not a crew task; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
   ;;
 esac
 if [ ! -d "$FOREMAN_TASKS/$TARGET" ]; then
-  foreman_die "bind '$BIND' names no crew task; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
+  house_die "bind '$BIND' names no crew task; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
 fi
 
 outfile=$(house_latest_outbox "$SLUG")
 if [ -z "$outfile" ]; then
-  foreman_die "no prescription for $SLUG yet; run: house-prescribe.sh $SLUG"
+  house_die "no prescription for $SLUG yet; run: house-prescribe.sh $SLUG"
 fi
 
 if [ "$path" -nt "$outfile" ]; then
