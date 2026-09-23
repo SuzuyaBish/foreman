@@ -292,6 +292,24 @@ every scope under its own heading, and adding an item without a project files it
 in the scope in focus. Placing a crew for a project puts that project in focus,
 so the board follows the work without you saying so twice.
 
+The board is yours. Ask for something and it goes straight on. The foreman never
+puts anything there on its own initiative: an idea it notices while working
+becomes a **proposal** instead, filed apart with a one-line reason and shown to
+you as a table.
+
+```
+#    PROPOSED                             REASON
+4    add a metrics tab                    we may need numbers
+5    prefetch the index                   it is slow
+```
+
+A proposal is a suggestion, not your work, so it never appears among your items
+— not on the board and not in the widget. The status line counts proposals
+separately and only when there are some (`… · todo 3/12 · 2 proposed`), and
+`crew_todo proposals` is where the whole table is read. Approving one promotes
+it to the board and keeps the number you already saw; declining it drops it.
+Both are yours to call: `approve 4` keeps it, `drop 4` lets it go.
+
 ## Decisions
 
 A crew member that hits a choice it should not make for itself asks for it
@@ -510,7 +528,7 @@ house mode the same session answers with the `house_*` tools further down.
 
 | Tool | What it does |
 |---|---|
-| `crew_todo` | the durable list: add, list, start, settle, focus a scope |
+| `crew_todo` | the durable list: add your items, propose and approve suggestions, list, start, settle, focus a scope |
 | `crew_projects` / `crew_models` | what there is to work on / run on |
 | `crew_spawn <id>` | start a crew member on a task |
 | `crew_list` | the board: crew states and the todo list |
