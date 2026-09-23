@@ -5,14 +5,15 @@
 #        crew-config.sh set <key> <value>
 #        crew-config.sh unset <key>
 #
-# Keys: crewModel crewThinking crewApprove crewIsolate trustPaths
+# Keys: crewModel crewThinking crewApprove crewIsolate trustPaths crewDelivery
+#       crewWake crewWidget
 # Stored in $FOREMAN_HOME/config.json, so settings are per-foreman-home and
 # never committed.
 set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"
 
-KEYS="crewModel crewThinking crewApprove crewIsolate trustPaths crewDelivery"
+KEYS="crewModel crewThinking crewApprove crewIsolate trustPaths crewDelivery crewWake crewWidget"
 
 valid_key() {
   case " $KEYS " in *" $1 "*) return 0 ;; esac
@@ -21,7 +22,7 @@ valid_key() {
 
 # Booleans are stored as JSON booleans so a reader never has to parse "yes".
 is_bool_key() {
-  case "$1" in crewApprove | crewIsolate | trustPaths) return 0 ;; esac
+  case "$1" in crewApprove | crewIsolate | trustPaths | crewWake | crewWidget) return 0 ;; esac
   return 1
 }
 
