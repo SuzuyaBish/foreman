@@ -459,14 +459,25 @@ which is a different axis. Reading the `[key]` prefix back instead of folding th
 event log a second time is deliberate: a second fold is how two views of one
 board start to disagree.
 
-The widget shows at most six lines: a row per active crew member with its report
-age, then open todo items in any slots left. Each state is coloured by its theme
-role (`warning`, `error`, `accent`, `success`, `dim`), so the chrome reads
-correctly in a light and a dark terminal, and a todo row carries `-` in the age
-column so it stays aligned under the crew. The same role mapping colours the
-status bits; the todo count stays muted. Ages follow the same rule as
-`foreman_age_human` in `bin/foreman-lib.sh`, so the widget and `/crew` never
-disagree about how old a report is.
+The widget shows at most six lines, one row per crew. A crew row carries the
+number and title of the todo item linked back to it, the crew's own state as the
+single status column, the report age, and the crew's last note as a short
+description of what it is actually doing. An item no active crew is linked to
+keeps its own row with its todo state. Folding the item into the crew's row is
+what keeps one piece of work from wearing two words: `working` and `active` are
+the same moment seen from the crew and from the board, and the row says it once.
+A crew settled at its prompt is shown as `idle`, read from the same
+`busy-state`/`busy-gen` records `crew_busy` reads; an unknown record falls back
+to the report state, and the status line's counts stay report states. Each state
+is coloured by its theme role (`warning`, `error`, `accent`, `success`, `dim`),
+so the chrome reads correctly in a light and a dark terminal, and the same role
+mapping colours the status bits while the todo count stays muted. Every column
+has a fixed share and is clipped, so a row cannot wrap; the crew id stays whole
+as the description's prefix, because it is how a crew is addressed. Ages follow
+the same rule as `foreman_age_human` in `bin/foreman-lib.sh`, so the widget and
+`/crew` never disagree about how old a report is. `/crew`'s argument completions
+read the same grammar table its handler dispatches, so the palette and the
+command cannot drift.
 
 Session start also injects one line of context — `crew digest: <fleet> ·
 <decisions> · <wakes> · <todo counts>` — built by `crew-digest.sh` from the same
@@ -477,12 +488,28 @@ clean. Nothing here reads a pane or a report.
 ### Calm mode
 
 Calm mode (`crewCalm`, `/crew calm on|off`) hides the foreman's own tool calls —
-the call line, its arguments and its output — so the captain reads only the
-responses. It is a display preference, not a context change: the tools still run
-and their results still reach the model. The status line, the widget, the wake
-message and the assistant responses are deliberately untouched.
+the call line, its arguments and its output — and the assistant's thinking, so
+the captain reads only the responses. It is a display preference, not a context
+change: the tools still run and their results still reach the model. The status
+line, the widget, the wake message and the assistant responses are deliberately
+untouched.
 
-It rides on the only rendering hook pi exposes to an extension: `renderCall`,
+Thinking has two paths, and calm quiets both by dropping thinking blocks before
+pi lays a message out. Pi draws every assistant message through the exported
+`AssistantMessageComponent`, so the extension patches that prototype's
+`updateContent` once: while calm is on it hands the original a shallow copy whose
+content omits `thinking` blocks. That covers visible thinking (Markdown) and the
+collapsed `Text` label `hideThinkingBlock` draws with one rule, which a label
+change alone cannot: pi wraps the label in the theme colour, so `Text` still sees
+a non-empty string and leaves a blank line. The stored message, the model
+context and export rendering are untouched. The decision is read at render time
+through a shared patch object, so toggling calm redraws thinking already on
+screen, and the wrapper restores `lastMessage` to the real message so turning
+calm off brings thinking back on the same row. A reload only refreshes the
+decision, never double-wraps. This mirrors the `collapsed-thinking` adapter in
+firstmate's Pi Calm, which does the same against the exported component.
+
+Tool calls ride on the other rendering hook pi exposes: `renderCall`,
 `renderResult` and `renderShell` on a tool definition. There is no global
 "hide tool calls" switch, so an extension can quiet only tools it defines.
 Calm wraps the extension's own tools directly, and re-registers pi's built-in

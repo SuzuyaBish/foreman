@@ -235,26 +235,39 @@ retires the crew's own workspace and never yours.
 While a session runs, a status line and a widget sit above the editor. Both are
 rendered straight from the task records — no Herdr call, no model call, no
 tokens. The line leads with what the captain owes and trails with the durable
-queue; the widget is worst-first, shows how long ago each crew last reported, and
-colours each state with its theme role:
+queue; the widget is worst-first, gives each state its theme role, and keeps one
+crew on one row:
 
 ```
 1 decision · 1 failed · 1 review · 2 working · todo 3/12 notes-app
 
-c-authque        blocked  4m   [api] retry policy: fail fast or back off?
-c-ingest         failed   30m  no such host: registry.internal
-c-docs           review   1m   PR #12 waiting to merge
-c-parser         working  7m   splitting the grammar
-#11              open     -    finish the widget
+#42   - Fix the retry policy      blocked  4m   c-authque [api] retry policy: f…
+#12   - Review the merge UI       review   1m   c-docs PR #12 waiting to merge
+#57   - Land the parser rewrite   working  7m   c-parser splitting the grammar
+-     - (no todo item)            failed   30m  c-ingest no such host: registry…
+#11   - Finish the widget         open     -    (no crew yet)
 ```
 
-The widget shows at most six lines: one per active crew member, then open todo
-items in the slots that are left. `/crew` prints the whole board; `/crew on|off`
-toggles the widget. `/crew calm on|off` toggles **calm mode**, which hides the
-foreman's own tool calls — the call line, its arguments and its output — so the
-captain reads only the responses. It never touches the responses, the status
-line, the widget or the wake message. The choice lives in `crewCalm` and
-survives a restart; `/crew calm` with no argument flips it.
+A row is: the todo number (or `-`), `-`, the todo title, a **single** status
+column, how long ago the crew last reported (`-` when no crew has), and a short
+description of what the crew is actually doing — its last note, or `(no note
+yet)`. The status column has one source: a crew in flight shows its own state
+(`working`, `idle`, `review`, `blocked`, …), while an item no crew has claimed
+shows its todo state (`open`). One piece of work therefore never lands in two
+rows, and the same moment never wears two words. The crew id stays visible as
+the description's prefix, because it is what you address a crew with; a long id
+shares the description's width with the note. A crew with no linked item and an
+item with no crew each keep a stated row. Every column has a fixed share and is
+clipped, so a row never wraps.
+
+The widget shows at most six lines. `/crew` prints the whole board, and the
+palette completes its arguments (`on`, `off`, `calm`, `calm on`, `calm off`);
+`/crew on|off` toggles the widget. `/crew calm on|off` toggles **calm mode**,
+which hides the foreman's own tool calls — the call line, its arguments and its
+output — and assistant thinking, so the captain reads only the responses. It
+never touches the responses, the status line, the widget or the wake message.
+The choice lives in `crewCalm` and survives a restart; `/crew calm` with no
+argument flips it.
 
 At session start the foreman is also handed one injected line, for example:
 

@@ -33,6 +33,24 @@ cat >"$ROOTDIR/node_modules/@earendil-works/pi-coding-agent/package.json" <<'JSO
 JSON
 cat >"$ROOTDIR/node_modules/@earendil-works/pi-coding-agent/index.js" <<'JS'
 export const defineTool = (tool) => tool;
+// The assistant-message component pi exports and lays thinking out through. The
+// extension patches its prototype to drop thinking while calm is on, so the stub
+// keeps the same contract: updateContent records the content types, and
+// invalidate() re-renders the last real message the way pi's own does.
+export class AssistantMessageComponent {
+  constructor(message, hideThinkingBlock = false) {
+    this.hideThinkingBlock = hideThinkingBlock;
+    this.content = [];
+    if (message) this.updateContent(message);
+  }
+  updateContent(message) {
+    this.lastMessage = message;
+    this.content = (message.content ?? []).map((block) => block.type);
+  }
+  invalidate() {
+    if (this.lastMessage) this.updateContent(this.lastMessage);
+  }
+}
 // The built-in tool definitions the extension re-registers to hide their calls.
 // Each carries its own renderers, and like the real ones they reuse
 // `context.lastComponent` for streaming updates - calling setText on it. That is
@@ -69,6 +87,7 @@ HARNESS="$ROOTDIR/chrome.mjs"
 cat >"$HARNESS" <<'JS'
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 
 const [, , extPath, home] = process.argv;
 process.env.FOREMAN_HOME = home;
@@ -128,6 +147,42 @@ const shown = last(widget);
 if (shown === undefined) process.stdout.write("WIDGET|(none)\n");
 else for (const line of shown) process.stdout.write(`WIDGET|${line}\n`);
 
+// --- /crew argument completions -------------------------------------------
+// The grammar the handler accepts must be the grammar the palette offers, so
+// both are read from one table. `calm`'s description is state-aware.
+const completeValues = (prefix) => {
+	const items = commands.crew.getArgumentCompletions(prefix);
+	return items ? items.map((i) => i.value).join(",") : "(none)";
+};
+const completeDescs = (prefix) => {
+	const items = commands.crew.getArgumentCompletions(prefix);
+	return items ? items.map((i) => `${i.value}:${i.description ?? ""}`).join(" | ") : "(none)";
+};
+process.stdout.write(`COMPLETE_EMPTY|${completeValues("")}\n`);
+process.stdout.write(`COMPLETE_C|${completeValues("c")}\n`);
+process.stdout.write(`COMPLETE_CALM|${completeValues("calm")}\n`);
+process.stdout.write(`COMPLETE_CALM_SPACE|${completeValues("calm ")}\n`);
+process.stdout.write(`COMPLETE_ON|${completeValues("on")}\n`);
+process.stdout.write(`COMPLETE_OFF|${completeValues("off")}\n`);
+process.stdout.write(`COMPLETE_MISS|${completeValues("zzz")}\n`);
+process.stdout.write(`COMPLETE_CALM_OFF_DESC|${completeDescs("calm")}\n`);
+
+// --- calm mode and assistant thinking -------------------------------------
+// Pi lays a message out through the exported AssistantMessageComponent, whose
+// content the extension patches while calm is on. This drives the real patch:
+// the block types that survive are what would be drawn.
+const thinkingMessage = {
+	role: "assistant",
+	content: [
+		{ type: "thinking", thinking: "secret reasoning" },
+		{ type: "text", text: "a reply" },
+	],
+	stopReason: "end",
+};
+const blocksOf = (component) => component.content.join(",");
+let calmComponent;
+process.stdout.write(`ASSISTANT_OFF|${blocksOf(new AssistantMessageComponent(thinkingMessage))}\n`);
+
 // --- calm mode -------------------------------------------------------------
 // The call renderer is synchronous; renderCall returns a component and the
 // count of lines it draws is what "hidden" means. 0 is hidden.
@@ -162,6 +217,9 @@ const reuse = () => {
 process.stdout.write(`CALM_BUILTIN_REUSE|${reuse()}\n`);
 
 await commands.crew.handler("calm on", ctx);
+process.stdout.write(`COMPLETE_CALM_ON_DESC|${completeDescs("calm")}\n`);
+calmComponent = new AssistantMessageComponent(thinkingMessage);
+process.stdout.write(`ASSISTANT_ON|${blocksOf(calmComponent)}\n`);
 process.stdout.write(`CONFIG|${fs.readFileSync(path.join(home, "config.json"), "utf8")}\n`);
 process.stdout.write(`CALM_CUSTOM_ON|${callLines(tools.crew_list, { action: "list" })}\n`);
 process.stdout.write(`CALM_RESULT_ON|${resultLines(tools.crew_list)}\n`);
@@ -172,6 +230,10 @@ process.stdout.write(`CALM_CHROME|${same ? "same" : "changed"}\n`);
 // A second look at the same row proves the toggle is live, not baked in at run time.
 await commands.crew.handler("calm off", ctx);
 process.stdout.write(`CALM_CUSTOM_AGAIN|${callLines(tools.crew_list, { action: "list" })}\n`);
+// The same instance, after the toggle: pi's invalidate() re-renders the real
+// message, so thinking comes back when calm goes off.
+calmComponent.invalidate();
+process.stdout.write(`ASSISTANT_AGAIN|${blocksOf(calmComponent)}\n`);
 
 // Reload: a fresh module instance reads the persisted setting off disk. This is
 // how the choice survives a restart, and it is the whole point of the config key.
@@ -242,10 +304,14 @@ test_the_widget_ranks_and_tiers_the_crew() {
   assert_contains "$WIDGET" "[[error]]failed" "a failure is an error"
   assert_contains "$WIDGET" "[[accent]]review" "a waiting PR is accent"
   assert_contains "$WIDGET" "[[success]]working" "a live crew is success"
-  # Five crew rows leave one todo slot, and relevance gives it to the item the
-  # crew is linked to, so the row here is the in-flight one. The queued row's
-  # dim role is pinned in the relevance test below.
-  assert_contains "$WIDGET" "[[accent]]active" "an in-flight todo is accent"
+  assert_contains "$WIDGET" "[[dim]]open" "a queued item is dim"
+  # A crew and its linked item are one row: five crew rows carry the items they
+  # are linked to, and only #11 (no crew) is a todo row of its own. `active` is
+  # never rendered, because it was the second word for `working`.
+  assert_contains "$WIDGET" "#12" "the linked item's number rides the crew row"
+  assert_contains "$WIDGET" "land the parser" "the linked item's title rides the crew row"
+  assert_not_contains "$WIDGET" "[[accent]]active" "an in-flight item is not a second row"
+  assert_not_contains "$WIDGET" "active" "one item never wears two words for one moment"
   assert_contains "$WIDGET" "1h " "the age of a report is shown"
 
   # Worst first, so the top of the widget is what needs the captain.
@@ -331,6 +397,20 @@ test_calm_mode_hides_the_foremans_tool_calls() {
   pass "calm mode hides the foreman's tool calls, is live and persists"
 }
 
+# Calm mode must quiet thinking too: the captain saw `thinking` lines for a whole
+# turn, and his setting collapses thinking to a label. Pi lays every assistant
+# message out through the exported AssistantMessageComponent, so the extension
+# drops thinking blocks from the presentation copy while calm is on. This drives
+# that patch: which block types survive is exactly what pi would draw.
+test_calm_mode_also_hides_assistant_thinking() {
+  assert_equals "thinking,text" "$(field ASSISTANT_OFF)" "thinking is drawn while calm is off"
+  assert_equals "text" "$(field ASSISTANT_ON)" "thinking blocks are dropped while calm is on"
+  # The reply is a different block and is never touched; the toggle redraws the
+  # rows already on screen because the patch keeps the real message for invalidate.
+  assert_equals "thinking,text" "$(field ASSISTANT_AGAIN)" "thinking returns when calm goes off, on the same row"
+  pass "calm mode collapses assistant thinking, live and reversible"
+}
+
 line_of() { # <text> <needle> -> 1-based line number
   printf '%s\n' "$1" | grep -n -F -e "$2" | head -1 | cut -d: -f1
 }
@@ -339,23 +419,42 @@ field() { # <NAME> -> the value printed as `NAME|value`
   printf '%s\n' "$OUT" | sed -n "s/^$1|//p" | head -1
 }
 
-# The captain saw the line say `2 working` while the widget showed a single
-# `active` row: the six-line budget filled with the crew rows and then the
-# oldest open items in file order, so the item linked to a working crew never
-# rendered. Relevance now resolves a crew's linked in-flight item before any
-# queued item, so the views agree.
-test_the_widget_keeps_the_in_flight_item_ahead_of_older_queued_ones() {
-  local h out widget now old lines
+# `/crew` accepts a small grammar (on, off, calm, calm on, calm off) but
+# registered no argument completions, so the subcommands were invisible in the
+# palette. The handler and the completion list now read one table; this pins the
+# grammar, the prefix filtering, and that a calm description is state-aware.
+test_the_crew_command_completes_its_arguments() {
+  assert_equals "on,off,calm,calm on,calm off" "$(field COMPLETE_EMPTY)" "an empty prefix offers every argument"
+  assert_equals "calm,calm on,calm off" "$(field COMPLETE_C)" "c filters to the calm family"
+  assert_equals "calm,calm on,calm off" "$(field COMPLETE_CALM)" "calm offers its on/off refinements"
+  assert_equals "calm on,calm off" "$(field COMPLETE_CALM_SPACE)" "a trailing space offers on and off"
+  assert_equals "on" "$(field COMPLETE_ON)" "on offers itself"
+  assert_equals "off" "$(field COMPLETE_OFF)" "off offers itself"
+  assert_equals "(none)" "$(field COMPLETE_MISS)" "a prefix that matches nothing returns null"
+
+  # Honest, state-aware descriptions: the entry says what it will do from here.
+  assert_contains "$(field COMPLETE_CALM_OFF_DESC)" "calm:turn calm mode on" "calm says it will turn calm on while it is off"
+  assert_contains "$(field COMPLETE_CALM_ON_DESC)" "calm:turn calm mode off" "calm says it will turn calm off once it is on"
+  pass "/crew completes its real argument grammar, state-aware"
+}
+
+# One row per crew. A crew and the item that links back to it used to render as
+# two rows with two words for one moment (`working` above, `active` below).
+# They now fold into the crew's row: the item's number and title ride along,
+# the crew's own state is the only status, and the item never renders twice.
+test_a_linked_item_folds_into_its_crews_row_and_the_budget_holds() {
+  local h out widget now old lines linked
   h=$(fm_tmproot chrome-relevance)/home
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   old=$(fm_iso_ago 3600)
   mkdir -p "$h/tasks/c-alpha" "$h/tasks/c-beta"
   printf 'state=working\nat=%s\nnote=building the parser\n' "$old" >"$h/tasks/c-alpha/status"
   printf 'state=working\nat=%s\nnote=landing the parser\n' "$now" >"$h/tasks/c-beta/status"
-  # Two crew rows leave four todo slots, and the linked item is last in file
-  # order, so only the relevance rule can save it: the oldest open rows are the
-  # ones that give up their lines.
-  printf '17\topen\t-\tolder queued one\n18\topen\t-\tolder queued two\n19\topen\t-\tolder queued three\n20\topen\t-\tolder queued four\n21\tactive\tc-beta\tland the parser\n' \
+  # The linked item is last in file order, behind five unclaimed ones, and two
+  # crew rows plus five queued rows is seven - one past the budget. It survives
+  # because it is part of c-beta's row, which worst-first never drops; the
+  # unclaimed rows are the ones that give up their lines.
+  printf '17\topen\t-\tolder queued one\n18\topen\t-\tolder queued two\n19\topen\t-\tolder queued three\n20\topen\t-\tolder queued four\n22\topen\t-\tolder queued five\n21\tactive\tc-beta\tland the parser\n' \
     >"$h/todo.tsv"
 
   out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
@@ -363,14 +462,132 @@ test_the_widget_keeps_the_in_flight_item_ahead_of_older_queued_ones() {
 
   assert_contains "$widget" "c-alpha" "the first working crew renders"
   assert_contains "$widget" "c-beta" "the second working crew renders"
-  assert_contains "$widget" "[[accent]]active" "the in-flight item carries the active role"
-  assert_contains "$widget" "[[dim]]open" "a queued item carries the dim role"
-  assert_contains "$widget" "#21" "the linked active item keeps its line"
-  assert_not_contains "$widget" "older queued four" "the oldest open row gives up its slot"
+  assert_contains "$widget" "land the parser" "the linked item's title rides its crew row"
+  assert_not_contains "$widget" "[[accent]]active" "the linked item is not a separate todo row"
+  linked=$(printf '%s\n' "$widget" | grep -c "#21")
+  assert_equals "1" "$linked" "the linked item renders exactly once"
+  assert_contains "$widget" "[[dim]]open" "an unclaimed item carries the dim role"
+  assert_not_contains "$widget" "older queued five" "the last unclaimed row gives up its slot"
 
   lines=$(printf '%s\n' "$widget" | grep -c .)
   [ "$lines" -le 6 ] || fail "the widget grew past its budget ($lines lines)"
-  pass "the widget renders the in-flight item before older queued ones"
+  pass "a linked item folds into its crew's row and the budget still holds"
+}
+
+# The captain's exact complaint, in one fixture: the status line counts one
+# working crew and the board has one active item, and they are the same work.
+# The widget must show one row, four-to-six columns, and the crew id the captain
+# addresses, and must not say the state twice.
+test_a_crew_and_its_item_render_as_one_row() {
+  local h out widget rows
+  h=$(fm_tmproot chrome-merge)/home
+  mkdir -p "$h/tasks/social-preview"
+  printf 'state=working\nat=%s\nnote=rendering the og image\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/social-preview/status"
+  printf '35\tactive\tsocial-preview\tForeman repo: social preview image\t-\tforeman\n' >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  rows=$(printf '%s\n' "$widget" | grep -c .)
+  assert_equals "1" "$rows" "a crew and its linked item are one row"
+  assert_contains "$widget" "#35" "the todo number is on the row"
+  assert_contains "$widget" "Foreman repo" "the todo title is on the row"
+  assert_contains "$widget" "[[success]]working" "the crew's own state is the single status column"
+  assert_not_contains "$widget" "[[accent]]active" "the linked item is not a second row"
+  assert_not_contains "$widget" "active" "one item never wears two words for one moment"
+  assert_contains "$widget" "social-preview" "the crew id the captain addresses stays visible"
+  assert_contains "$widget" "rendering the og" "the row says what the crew is actually doing"
+  pass "a crew and its linked todo item render as one row"
+}
+
+# A crew's report state is a claim; its own semantic busy record is sharper. A
+# crew settled at its prompt is `idle`, not `working`. Unknown - no record, or
+# one from a stale incarnation - falls back to the report state, never to idle.
+# The status line's counts are report states and are deliberately untouched.
+test_the_status_column_honours_the_crews_own_busy_record() {
+  local h out status widget now busy idle stale none
+  h=$(fm_tmproot chrome-busy)/home
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mkdir -p "$h/tasks/c-busy" "$h/tasks/c-idle" "$h/tasks/c-stale" "$h/tasks/c-none"
+  for id in c-busy c-idle c-stale c-none; do
+    printf 'state=working\nat=%s\nnote=x\n' "$now" >"$h/tasks/$id/status"
+  done
+  printf 'g1\n' >"$h/tasks/c-busy/busy-gen"
+  printf 'v1 gen=g1 seq=1 state=busy source=crew-ext event=agent-start ts=0\n' >"$h/tasks/c-busy/busy-state"
+  printf 'g2\n' >"$h/tasks/c-idle/busy-gen"
+  printf 'v1 gen=g2 seq=2 state=idle source=crew-ext event=agent-settled ts=0\n' >"$h/tasks/c-idle/busy-state"
+  # A stale incarnation: the token does not match the armed sidecar.
+  printf 'g3\n' >"$h/tasks/c-stale/busy-gen"
+  printf 'v1 gen=old seq=2 state=idle source=crew-ext event=agent-settled ts=0\n' >"$h/tasks/c-stale/busy-state"
+  printf '1\topen\t-\twork\n' >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  status=$(printf '%s\n' "$out" | sed -n 's/^STATUS|//p')
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  busy=$(printf '%s\n' "$widget" | grep -F "c-busy")
+  idle=$(printf '%s\n' "$widget" | grep -F "c-idle")
+  stale=$(printf '%s\n' "$widget" | grep -F "c-stale")
+  none=$(printf '%s\n' "$widget" | grep -F "c-none")
+  assert_contains "$busy" "[[success]]working" "a mid-turn crew is working"
+  assert_contains "$idle" "[[dim]]idle" "a crew settled at its prompt is idle"
+  assert_not_contains "$idle" "working" "a settled crew is not working"
+  assert_contains "$stale" "[[success]]working" "a stale busy record leaves the report state alone"
+  assert_contains "$none" "[[success]]working" "no busy record leaves the report state alone"
+
+  # The report state is still what the status line counts; the row is sharper,
+  # the count is not changed by the display.
+  assert_contains "$status" "4 working" "the status line still counts the report states"
+  pass "the row's status is honest about busy vs settled, unknown falls back"
+}
+
+# The two leftovers the merge creates, both stated rather than silent: a crew
+# with no linked item, and an item no crew is working.
+test_the_two_leftovers_each_keep_a_stated_row() {
+  local h out widget solo
+  h=$(fm_tmproot chrome-leftovers)/home
+  mkdir -p "$h/tasks/c-solo"
+  printf 'state=working\nat=%s\nnote=on its own\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/c-solo/status"
+  printf '7\topen\t-\tnobody is on this\n' >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  solo=$(printf '%s\n' "$widget" | grep -F "c-solo")
+  assert_contains "$solo" "(no todo item)" "a crew with no item says so"
+  assert_contains "$solo" "on its own" "the crew's own description still renders"
+  assert_contains "$widget" "#7" "an unclaimed item keeps its number"
+  assert_contains "$widget" "nobody is on this" "an unclaimed item keeps its title"
+  assert_contains "$widget" "(no crew yet)" "an unclaimed item says no crew is on it"
+  assert_contains "$widget" "[[dim]]open" "an unclaimed item shows its own todo state"
+  pass "both leftovers render a stated row"
+}
+
+# No row may wrap, at any width. The number, title and description have fixed
+# shares and are clipped; a 200-character title and a 200-character note still
+# render one line each, bounded to the chrome's conservative width, with both
+# clipped columns marked and the status and age columns surviving the cut.
+test_a_row_never_wraps_at_the_narrow_bound() {
+  local h out widget now longest ellipses
+  h=$(fm_tmproot chrome-narrow)/home
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mkdir -p "$h/tasks/c-long"
+  printf 'state=working\nat=%s\nnote=%s\n' "$now" "$(printf 'n%.0s' {1..200})" >"$h/tasks/c-long/status"
+  printf '41\tactive\tc-long\t%s\n' "$(printf 't%.0s' {1..200})" >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  # Visible columns, not string length: strip the fake theme's role tags and
+  # fold the multibyte ellipsis to one byte first.
+  longest=$(printf '%s\n' "$widget" | sed 's/\[\[[^]]*\]\]//g; s/…/./g' | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+  [ "$longest" -le 80 ] || fail "a widget row wraps past its bound ($longest columns)"
+
+  ellipses=$(printf '%s\n' "$widget" | grep -o "…" | wc -l | tr -d ' ')
+  [ "$ellipses" -ge 2 ] || fail "the title and the description are both clipped ($ellipses ellipses)"
+  assert_contains "$widget" "[[success]]working" "the status column survives the clipping"
+  assert_contains "$widget" "c-long" "the crew id survives the clipping"
+  pass "a row with a huge title and note stays one bounded line"
 }
 
 # A requirement typed as one long sentence used to wrap into several terminal
@@ -444,7 +661,13 @@ test_the_status_line_leads_with_what_is_owed
 test_the_widget_ranks_and_tiers_the_crew
 test_the_widget_can_be_turned_off
 test_calm_mode_hides_the_foremans_tool_calls
+test_calm_mode_also_hides_assistant_thinking
+test_the_crew_command_completes_its_arguments
 test_the_chrome_is_scoped_to_the_project_in_focus
-test_the_widget_keeps_the_in_flight_item_ahead_of_older_queued_ones
+test_a_linked_item_folds_into_its_crews_row_and_the_budget_holds
+test_a_crew_and_its_item_render_as_one_row
+test_the_status_column_honours_the_crews_own_busy_record
+test_the_two_leftovers_each_keep_a_stated_row
+test_a_row_never_wraps_at_the_narrow_bound
 test_an_enormous_item_is_truncated_and_keeps_the_budget
 test_a_proposal_is_counted_apart_and_never_a_captain_row
