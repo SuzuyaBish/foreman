@@ -33,6 +33,20 @@ SH
   pass "--copy tells a missing clipboard from a failing one"
 }
 
+test_latest_outbox_reads_the_numeric_suffix() {
+  rm -rf "$OUTBOX"
+  mkdir -p "$OUTBOX"
+  : >"$OUTBOX/atlas-20260101T000000Z.md"
+  : >"$OUTBOX/atlas-20260101T000000Z-2.md"
+  local got
+  got=$(. "$BIN/house-lib.sh" && house_latest_outbox atlas)
+  assert_equals "$OUTBOX/atlas-20260101T000000Z-2.md" "$got" "the numbered suffix is the newest, not '.<ts>'"
+  : >"$OUTBOX/atlas-20260102T000000Z.md"
+  got=$(. "$BIN/house-lib.sh" && house_latest_outbox atlas)
+  assert_equals "$OUTBOX/atlas-20260102T000000Z.md" "$got" "a later timestamp beats an earlier suffixed file"
+  pass "latest outbox is newest by timestamp, then by numeric suffix"
+}
+
 test_refuses_without_a_next() {
   "$AREA" add blank --kind repo >/dev/null
   local rc
@@ -155,3 +169,4 @@ test_copy_uses_a_clipboard_when_present
 test_copy_degrades_without_a_clipboard
 test_copy_reports_a_failing_clipboard
 test_outbox_collisions_do_not_overwrite
+test_latest_outbox_reads_the_numeric_suffix

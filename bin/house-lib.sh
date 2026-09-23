@@ -288,16 +288,34 @@ house_slugs() { # [--all]
   fi
 }
 
-# The newest outbox file for a slug, or nothing.
+# The newest outbox file for a slug, or nothing. Prescriptions are named
+# `<slug>-<ts>.md`, with `-2`, `-3` appended when two land in the same second,
+# so "newest" is the largest timestamp and then the largest numeric suffix. A
+# plain string compare reads `.` (0x2E) as greater than `-` (0x2D) and returns
+# the older `-2` file, which is exactly the bug this replaced.
 house_latest_outbox() { # <slug>
-  local f best='' best_key=''
+  local f slug=${1:-} best='' best_ts='' best_suf=0 ts suf rest
   [ -d "$HOUSE_OUTBOX" ] || return 0
-  for f in "$HOUSE_OUTBOX/$1"-*.md; do
+  for f in "$HOUSE_OUTBOX/$slug"-*.md; do
     [ -e "$f" ] || continue
-    if [ -z "$best_key" ] || [ "$f" \> "$best_key" ]; then
-      best=$f
-      best_key=$f
+    rest=${f##*/}
+    rest=${rest#"$slug"-}
+    rest=${rest%.md}
+    ts=${rest%%-*}
+    suf=${rest#"$ts"}
+    suf=${suf#-}
+    case "$suf" in
+    '' | *[!0-9]*) suf=1 ;;
+    esac
+    if [ -n "$best" ]; then
+      [ "$ts" \< "$best_ts" ] && continue
+      if [ "$ts" = "$best_ts" ] && [ "$suf" -le "$best_suf" ]; then
+        continue
+      fi
     fi
+    best=$f
+    best_ts=$ts
+    best_suf=$suf
   done
   [ -n "$best" ] && printf '%s' "$best"
   # Always succeed: an absent outbox is a normal answer, and a nonzero here
