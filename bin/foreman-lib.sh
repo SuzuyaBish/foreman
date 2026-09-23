@@ -30,8 +30,11 @@ foreman_need_herdr() {
 
 # Task ids become tab labels, directory names, and CLI arguments. Allow only a
 # bare kebab-case slug so nothing downstream has to quote for safety.
+# Character classes below are spelled out rather than written as ranges: under a
+# UTF-8 collation `[a-z]` also matches `A` (and `é`), which would let a bad id or
+# key through on exactly the hosts the foreman runs on.
 foreman_valid_id() {
-  case "$1" in '' | *[!a-z0-9-]* | [!a-z0-9]*) return 1 ;; esac
+  case "$1" in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789-]* | [!abcdefghijklmnopqrstuvwxyz0123456789]*) return 1 ;; esac
   [ "${#1}" -le 32 ]
 }
 
@@ -41,7 +44,7 @@ foreman_valid_state() {
 }
 
 foreman_valid_key() {
-  case "$1" in '' | *[!a-z_]*) return 1 ;; esac
+  case "$1" in '' | *[!abcdefghijklmnopqrstuvwxyz_]*) return 1 ;; esac
 }
 
 # --- session config -------------------------------------------------------

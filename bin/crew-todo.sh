@@ -203,6 +203,7 @@ list)
   shift || true
   while [ $# -gt 0 ]; do
     case "$1" in
+    --all) FILTER=all ;;
     --open) FILTER=open ;;
     --no-notes) NOTES=0 ;;
     *) foreman_die "unknown list option: $1" ;;

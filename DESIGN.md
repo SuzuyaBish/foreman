@@ -55,6 +55,8 @@ foreman/
   extensions/foreman.ts  the model-facing tools, auto wake, and crew chrome
   bin/foreman            launcher: pi -e extensions/foreman.ts
   bin/*.sh               zero-token mechanics
+  bin/crew-test.sh       runs the behaviour suite
+  tests/<subject>.test.sh  one file per subject; fake herdr/gh/pi
   projects/              the captain's repositories (gitignored)
   worktrees/<id>         one git worktree per isolated crew member (gitignored)
   .foreman/              runtime state (gitignored)
@@ -176,6 +178,25 @@ building a visual deliverable uses a board by default and reports
 The status line and the crew widget are rendered from the task records on a
 local timer and after every tool call. They make no model call and no Herdr call,
 so fleet visibility costs nothing.
+
+## Tests
+
+The suite (`bin/crew-test.sh`, `tests/`) is the regression check for the
+zero-token mechanics. Its shape follows from the design:
+
+- **Real scripts, isolated state.** Every test runs the production script with
+  `FOREMAN_HOME`, `FOREMAN_PROJECTS` and `FOREMAN_WORKTREES` pointed at a
+  throwaway directory, so a test can never read or write the captain's fleet.
+- **Stub only the outside world.** `herdr` is an external server, and `gh`,
+  `pi` and `lavish-axi` are external tools, so `tests/lib.sh` installs fakes for
+  them first on `PATH`. The stub Herdr is per-pane files, which lets a test
+  destroy a pane while keeping the tab — the churn recovery has to tell apart.
+- **One file, one subject.** A test file stops at the first failed assertion and
+  the runner reports one PASS/FAIL per file with its output, so a failure names
+  the contract that broke rather than one assertion out of hundreds.
+- **The suite is part of the contract.** A change to a mechanic is expected to
+  come with its test, and `AGENTS.md` tells the foreman to run the suite after
+  touching `bin/`.
 
 ## What is deliberately absent
 

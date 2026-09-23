@@ -62,7 +62,7 @@ case "$MODE" in
 --interrupt)
   foreman_herdr pane send-keys "$PANE" esc >/dev/null 2>&1 ||
     foreman_die "could not deliver the interrupt to $PANE"
-  foreman_event_append "$ID" blocked "" "interrupted by the foreman; agent idle at its prompt"
+  foreman_event_append "$ID" blocked "" "${REASON:-interrupted by the foreman; agent idle at its prompt}"
   foreman_status_sync "$ID"
   printf 'interrupted %s (agent still running)\n' "$ID"
   ;;

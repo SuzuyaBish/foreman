@@ -49,7 +49,8 @@ esac
 
 DIR=$(foreman_require_task "$ID")
 if [ -n "$KEY" ]; then
-  case "$KEY" in *[!A-Za-z0-9._-]*) foreman_die "decision key must be a bare token: $KEY" ;; esac
+  # Spelled out, not `A-Za-z`: a UTF-8 collation range would admit `é`.
+  case "$KEY" in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) foreman_die "decision key must be a bare token: $KEY" ;; esac
 fi
 [ "$VERB" = needs-decision ] || [ -z "$KEY" ] || foreman_die "--key is only valid with needs-decision"
 [ "$VERB" = needs-decision ] && [ -z "$KEY" ] && foreman_die "needs-decision requires --key"

@@ -151,6 +151,25 @@ the poll is a tracked background child of that session — the shape `lavish-axi
 requires, and the reason a long poll never holds a turn. Crew are told to use a
 board by default for visual work.
 
+## Tests
+
+```sh
+bin/crew-test.sh                            # every test file
+bin/crew-test.sh tests/crew-todo.test.sh    # one subject
+bin/crew-test.sh --list
+```
+
+`tests/<subject>.test.sh` drives the real scripts in `bin/` inside an isolated
+`FOREMAN_HOME`, with fake `herdr`, `gh`, `pi` and `lavish-axi` first on `PATH`.
+The suite never touches a live Herdr session, a real pull request, or `~/.pi`.
+One file is one subject and stops at the first bad assertion; `crew-test.sh`
+reports one PASS/FAIL per file with its captured output.
+
+It is a behaviour suite, not a mock suite: only the external server (`herdr`) and
+the network tools (`gh`, `pi`, `lavish-axi`) are stubbed. Everything else — the
+event fold, the todo list, the worktree mechanics, spawn/stop/recover — runs the
+production code path.
+
 ## Pieces
 
 | Command | Does |
@@ -178,6 +197,7 @@ board by default for visual work.
 | `bin/crew-stop.sh <id> [--exit\|--close]` | interrupt / exit / close |
 | `bin/crew-archive.sh <id> [--worktree]` | retire a finished task |
 | `bin/crew-watch.sh` | one-shot watcher behind the auto wake |
+| `bin/crew-test.sh` | the behaviour suite in `tests/` |
 
 State lives in `.foreman/` (gitignored); `FOREMAN_HOME` relocates it and
 `FOREMAN_SESSION` picks a named Herdr session (default `default`).

@@ -115,6 +115,9 @@ if [ "$ISOLATE" = 1 ]; then
   WT=$("$FOREMAN_ROOT/bin/crew-worktree.sh" add "$PROJECT" "$ID" --base "$BASE") ||
     foreman_die "could not create an isolated worktree for '$ID' in project '$PROJECT'"
   CWD=$WT
+elif [ -z "$CWD" ] && [ -n "$PROJECT" ]; then
+  # --no-isolate (or crewIsolate=false) works directly in the project checkout.
+  CWD=$(foreman_project_path "$PROJECT")
 fi
 [ -d "$CWD" ] || foreman_die "working directory does not exist: $CWD"
 CWD=$(cd "$CWD" && pwd -P)
