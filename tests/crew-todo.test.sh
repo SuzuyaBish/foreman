@@ -102,6 +102,22 @@ test_start_done_open_drop() {
   pass "intent transitions are explicit and validated"
 }
 
+test_item_lookup() {
+  local seq out
+  fm_task linked-crew working >/dev/null
+  fm_task unlinked-crew working >/dev/null
+  seq=$(add_item "the work this crew is doing")
+  "$TODO" start "$seq" linked-crew >/dev/null
+
+  out=$("$TODO" item linked-crew)
+  assert_equals "$(printf '%s\tthe work this crew is doing' "$seq")" "$out" \
+    "item resolves a crew to its linked item's number and title"
+  assert_equals "" "$("$TODO" item unlinked-crew)" "an unlinked crew resolves to nothing"
+  assert_equals "" "$("$TODO" item -)" "the empty crew resolves to nothing"
+  assert_equals "" "$("$TODO" item missing-crew)" "an unknown crew resolves to nothing"
+  pass "a crew resolves to the item linked to it"
+}
+
 test_sync_follows_the_crew() {
   # Fresh home-local list: use real ids so the linked crew state is read live.
   fm_task wok done >/dev/null
@@ -280,6 +296,7 @@ test_list_rendering
 test_note_updates_in_place
 test_sanitize_protects_the_row_format
 test_start_done_open_drop
+test_item_lookup
 test_sync_follows_the_crew
 test_sync_keeps_a_delivered_crew_done
 test_summary
