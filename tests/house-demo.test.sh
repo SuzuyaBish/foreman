@@ -132,6 +132,20 @@ test_clear_keeps_a_non_demo_chart_at_a_demo_slug() {
   pass "clear leaves a real chart whose slug matches a demo slug"
 }
 
+test_clear_keeps_a_real_prescription_at_a_demo_slug() {
+  reset_house
+  plant_real atlas "a real area that happens to use the demo slug"
+  mkdir -p "$OUTBOX"
+  : >"$OUTBOX/atlas-20200101T000000Z.md"
+  local out
+  out=$("$DEMO" clear)
+  assert_contains "$out" "kept atlas (not a demo fixture)" "clear names the chart it left alone"
+  assert_contains "$out" "kept prescription atlas-20200101T000000Z.md" "clear names the prescription it left alone"
+  assert_present "$AREAS/atlas.md" "the real chart survives"
+  assert_present "$OUTBOX/atlas-20200101T000000Z.md" "the real prescription survives"
+  pass "clear never deletes a real prescription at a demo slug"
+}
+
 test_seed_refuses_to_clobber_a_real_area() {
   reset_house
   plant_real atlas "the captain's real atlas work"
@@ -211,6 +225,7 @@ test_seed_writes_the_cast_and_rounds_see_it
 test_reseed_is_a_safe_noop
 test_clear_removes_exactly_the_cast
 test_clear_keeps_a_non_demo_chart_at_a_demo_slug
+test_clear_keeps_a_real_prescription_at_a_demo_slug
 test_seed_refuses_to_clobber_a_real_area
 test_clear_removes_the_demo_outbox
 test_default_bind_refuses_and_points_at_copy
