@@ -380,6 +380,19 @@ foreman_status_sync() { # <id>
   } >"$tmp" && mv "$tmp" "$dir/status"
 }
 
+# --- merge refusals ---------------------------------------------------------
+#
+# `gh pr merge` can refuse for a reason GitHub itself calls temporary: the base
+# branch moved between the mergeability check and the merge, so GitHub answers
+# "Base branch was modified. Review and try the merge again." The crew's branch
+# and its open pull request are untouched, so the merge command retries in place
+# rather than waking the crew to report review again. Only this signature is
+# transient; a conflict, a protected branch, a failing required check, a closed
+# pull request and an auth failure all stay real failures.
+foreman_merge_refusal_transient() { # <reason>
+  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | grep -q 'base branch was modified'
+}
+
 # Open decisions across the fleet: "<id>\t<key>\t<note>".
 foreman_open_decisions() {
   local dir
