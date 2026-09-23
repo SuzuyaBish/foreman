@@ -33,6 +33,24 @@ cat >"$ROOTDIR/node_modules/@earendil-works/pi-coding-agent/package.json" <<'JSO
 JSON
 cat >"$ROOTDIR/node_modules/@earendil-works/pi-coding-agent/index.js" <<'JS'
 export const defineTool = (tool) => tool;
+// The assistant-message component pi exports and lays thinking out through. The
+// extension patches its prototype to drop thinking while calm is on, so the stub
+// keeps the same contract: updateContent records the content types, and
+// invalidate() re-renders the last real message the way pi's own does.
+export class AssistantMessageComponent {
+  constructor(message, hideThinkingBlock = false) {
+    this.hideThinkingBlock = hideThinkingBlock;
+    this.content = [];
+    if (message) this.updateContent(message);
+  }
+  updateContent(message) {
+    this.lastMessage = message;
+    this.content = (message.content ?? []).map((block) => block.type);
+  }
+  invalidate() {
+    if (this.lastMessage) this.updateContent(this.lastMessage);
+  }
+}
 // The built-in tool definitions the extension re-registers to hide their calls.
 // Each carries its own renderers, and like the real ones they reuse
 // `context.lastComponent` for streaming updates - calling setText on it. That is
@@ -69,6 +87,7 @@ HARNESS="$ROOTDIR/chrome.mjs"
 cat >"$HARNESS" <<'JS'
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 
 const [, , extPath, home] = process.argv;
 process.env.FOREMAN_HOME = home;
@@ -148,6 +167,22 @@ process.stdout.write(`COMPLETE_OFF|${completeValues("off")}\n`);
 process.stdout.write(`COMPLETE_MISS|${completeValues("zzz")}\n`);
 process.stdout.write(`COMPLETE_CALM_OFF_DESC|${completeDescs("calm")}\n`);
 
+// --- calm mode and assistant thinking -------------------------------------
+// Pi lays a message out through the exported AssistantMessageComponent, whose
+// content the extension patches while calm is on. This drives the real patch:
+// the block types that survive are what would be drawn.
+const thinkingMessage = {
+	role: "assistant",
+	content: [
+		{ type: "thinking", thinking: "secret reasoning" },
+		{ type: "text", text: "a reply" },
+	],
+	stopReason: "end",
+};
+const blocksOf = (component) => component.content.join(",");
+let calmComponent;
+process.stdout.write(`ASSISTANT_OFF|${blocksOf(new AssistantMessageComponent(thinkingMessage))}\n`);
+
 // --- calm mode -------------------------------------------------------------
 // The call renderer is synchronous; renderCall returns a component and the
 // count of lines it draws is what "hidden" means. 0 is hidden.
@@ -183,6 +218,8 @@ process.stdout.write(`CALM_BUILTIN_REUSE|${reuse()}\n`);
 
 await commands.crew.handler("calm on", ctx);
 process.stdout.write(`COMPLETE_CALM_ON_DESC|${completeDescs("calm")}\n`);
+calmComponent = new AssistantMessageComponent(thinkingMessage);
+process.stdout.write(`ASSISTANT_ON|${blocksOf(calmComponent)}\n`);
 process.stdout.write(`CONFIG|${fs.readFileSync(path.join(home, "config.json"), "utf8")}\n`);
 process.stdout.write(`CALM_CUSTOM_ON|${callLines(tools.crew_list, { action: "list" })}\n`);
 process.stdout.write(`CALM_RESULT_ON|${resultLines(tools.crew_list)}\n`);
@@ -193,6 +230,10 @@ process.stdout.write(`CALM_CHROME|${same ? "same" : "changed"}\n`);
 // A second look at the same row proves the toggle is live, not baked in at run time.
 await commands.crew.handler("calm off", ctx);
 process.stdout.write(`CALM_CUSTOM_AGAIN|${callLines(tools.crew_list, { action: "list" })}\n`);
+// The same instance, after the toggle: pi's invalidate() re-renders the real
+// message, so thinking comes back when calm goes off.
+calmComponent.invalidate();
+process.stdout.write(`ASSISTANT_AGAIN|${blocksOf(calmComponent)}\n`);
 
 // Reload: a fresh module instance reads the persisted setting off disk. This is
 // how the choice survives a restart, and it is the whole point of the config key.
@@ -354,6 +395,20 @@ test_calm_mode_hides_the_foremans_tool_calls() {
   # It quiets the tool call chrome and nothing else: no status, no widget change.
   assert_contains "$OUT" "CALM_CHROME|same" "calm mode leaves the status line and the widget alone"
   pass "calm mode hides the foreman's tool calls, is live and persists"
+}
+
+# Calm mode must quiet thinking too: the captain saw `thinking` lines for a whole
+# turn, and his setting collapses thinking to a label. Pi lays every assistant
+# message out through the exported AssistantMessageComponent, so the extension
+# drops thinking blocks from the presentation copy while calm is on. This drives
+# that patch: which block types survive is exactly what pi would draw.
+test_calm_mode_also_hides_assistant_thinking() {
+  assert_equals "thinking,text" "$(field ASSISTANT_OFF)" "thinking is drawn while calm is off"
+  assert_equals "text" "$(field ASSISTANT_ON)" "thinking blocks are dropped while calm is on"
+  # The reply is a different block and is never touched; the toggle redraws the
+  # rows already on screen because the patch keeps the real message for invalidate.
+  assert_equals "thinking,text" "$(field ASSISTANT_AGAIN)" "thinking returns when calm goes off, on the same row"
+  pass "calm mode collapses assistant thinking, live and reversible"
 }
 
 line_of() { # <text> <needle> -> 1-based line number
@@ -606,6 +661,7 @@ test_the_status_line_leads_with_what_is_owed
 test_the_widget_ranks_and_tiers_the_crew
 test_the_widget_can_be_turned_off
 test_calm_mode_hides_the_foremans_tool_calls
+test_calm_mode_also_hides_assistant_thinking
 test_the_crew_command_completes_its_arguments
 test_the_chrome_is_scoped_to_the_project_in_focus
 test_a_linked_item_folds_into_its_crews_row_and_the_budget_holds

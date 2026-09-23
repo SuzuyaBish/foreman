@@ -256,10 +256,11 @@ clipped, so a row never wraps.
 The widget shows at most six lines. `/crew` prints the whole board, and the
 palette completes its arguments (`on`, `off`, `calm`, `calm on`, `calm off`);
 `/crew on|off` toggles the widget. `/crew calm on|off` toggles **calm mode**,
-which hides the foreman's own tool calls — the call line, its arguments and its output — so the
-captain reads only the responses. It never touches the responses, the status
-line, the widget or the wake message. The choice lives in `crewCalm` and
-survives a restart; `/crew calm` with no argument flips it.
+which hides the foreman's own tool calls — the call line, its arguments and its
+output — and assistant thinking, so the captain reads only the responses. It
+never touches the responses, the status line, the widget or the wake message.
+The choice lives in `crewCalm` and survives a restart; `/crew calm` with no
+argument flips it.
 
 At session start the foreman is also handed one injected line, for example:
 

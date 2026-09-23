@@ -488,12 +488,28 @@ clean. Nothing here reads a pane or a report.
 ### Calm mode
 
 Calm mode (`crewCalm`, `/crew calm on|off`) hides the foreman's own tool calls —
-the call line, its arguments and its output — so the captain reads only the
-responses. It is a display preference, not a context change: the tools still run
-and their results still reach the model. The status line, the widget, the wake
-message and the assistant responses are deliberately untouched.
+the call line, its arguments and its output — and the assistant's thinking, so
+the captain reads only the responses. It is a display preference, not a context
+change: the tools still run and their results still reach the model. The status
+line, the widget, the wake message and the assistant responses are deliberately
+untouched.
 
-It rides on the only rendering hook pi exposes to an extension: `renderCall`,
+Thinking has two paths, and calm quiets both by dropping thinking blocks before
+pi lays a message out. Pi draws every assistant message through the exported
+`AssistantMessageComponent`, so the extension patches that prototype's
+`updateContent` once: while calm is on it hands the original a shallow copy whose
+content omits `thinking` blocks. That covers visible thinking (Markdown) and the
+collapsed `Text` label `hideThinkingBlock` draws with one rule, which a label
+change alone cannot: pi wraps the label in the theme colour, so `Text` still sees
+a non-empty string and leaves a blank line. The stored message, the model
+context and export rendering are untouched. The decision is read at render time
+through a shared patch object, so toggling calm redraws thinking already on
+screen, and the wrapper restores `lastMessage` to the real message so turning
+calm off brings thinking back on the same row. A reload only refreshes the
+decision, never double-wraps. This mirrors the `collapsed-thinking` adapter in
+firstmate's Pi Calm, which does the same against the exported component.
+
+Tool calls ride on the other rendering hook pi exposes: `renderCall`,
 `renderResult` and `renderShell` on a tool definition. There is no global
 "hide tool calls" switch, so an extension can quiet only tools it defines.
 Calm wraps the extension's own tools directly, and re-registers pi's built-in

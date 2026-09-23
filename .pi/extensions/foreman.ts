@@ -765,6 +765,57 @@ const lavishPoll = defineTool({
 /** True while the current session is quiet. Read at render time, so a toggle redraws at once. */
 let calmEnabled = configFlag("crewCalm", false);
 
+/**
+ * Calm must hide assistant thinking as well as tool calls. Pi draws one
+ * `AssistantMessageComponent` per assistant message - the streaming one and the
+ * settled one - and that component is exported, so one prototype patch can drop
+ * thinking content from a shallow presentation copy before pi lays it out. It
+ * covers both of pi's thinking paths at once: visible thinking (Markdown) and
+ * the collapsed `Text` label `hideThinkingBlock` draws, which a label change
+ * alone cannot remove (pi wraps the label in the theme colour, so `Text` still
+ * sees a non-empty string and draws a blank line). The stored message, the
+ * model context and export rendering are never touched; only the copy handed to
+ * the layout is filtered.
+ *
+ * The decision is read at render time through the shared patch object, so
+ * toggling calm redraws thinking already on screen, and restoring `lastMessage`
+ * to the real message means turning calm off brings it back. The wrapper is
+ * installed once per process; a reload only refreshes its decision, so it can
+ * never be double-wrapped with a stale flag.
+ *
+ * This mirrors the `collapsed-thinking` adapter in firstmate's Pi Calm, which
+ * does the same against the exported component.
+ */
+const CALM_ASSISTANT_LAYOUT = Symbol.for("foreman:calm-assistant-layout");
+
+function installCalmAssistantLayout() {
+	const registry = globalThis as Record<symbol, { hidesThinking: () => boolean } | undefined>;
+	const hidesThinking = () => calmEnabled;
+	const installed = registry[CALM_ASSISTANT_LAYOUT];
+	if (installed) {
+		installed.hidesThinking = hidesThinking;
+		return;
+	}
+	const component = (sdkModule as unknown as Record<string, any>).AssistantMessageComponent;
+	const original = component?.prototype?.updateContent;
+	if (typeof component !== "function" || typeof original !== "function") return;
+	const patch = { hidesThinking };
+	component.prototype.updateContent = function (message: any, ...rest: any[]) {
+		const state = this as { lastMessage?: unknown };
+		const thinking = Array.isArray(message?.content)
+			? message.content.filter((block: any) => block.type === "thinking")
+			: [];
+		const presentation = patch.hidesThinking() && thinking.length
+			? { ...message, content: message.content.filter((block: any) => block.type !== "thinking") }
+			: message;
+		original.call(this, presentation, ...rest);
+		// Re-render against the real message, so `invalidate()` (and a calm toggle)
+		// re-evaluates the rule instead of a copy that already lost its thinking.
+		if (presentation !== message) state.lastMessage = message;
+	};
+	registry[CALM_ASSISTANT_LAYOUT] = patch;
+}
+
 interface CalmComponent {
 	render(width: number): string[];
 	invalidate?(): void;
@@ -1626,4 +1677,7 @@ export default function foreman(pi: ExtensionAPI) {
 	// Also calm pi's built-in tools. Done last so the extension's own tools are
 	// registered first, and defensive so a pi without the factories still works.
 	registerCalmBuiltins(pi);
+
+	// And collapse assistant thinking; the exported component carries the layout.
+	installCalmAssistantLayout();
 }
