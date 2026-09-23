@@ -474,10 +474,47 @@ const lavishPoll = defineTool({
 interface CrewRow {
 	id: string;
 	state: string;
+	at: string;
 	note: string;
 }
 
 const ACTIVE_STATES = new Set(["queued", "working", "review", "blocked", "failed", "lost"]);
+
+/**
+ * Worst first. A state the captain has to act on leads the status line and the
+ * widget; a state that is merely alive trails it. Anything unrecognised sorts
+ * last rather than vanishing.
+ */
+const STATE_ORDER = ["blocked", "failed", "lost", "review", "working", "queued"];
+const STATE_RANK = new Map(STATE_ORDER.map((state, i) => [state, i]));
+
+/** Theme roles, so the chrome reads correctly in a light and a dark terminal. */
+const STATE_COLOR: Record<string, "warning" | "error" | "accent" | "success" | "dim"> = {
+	blocked: "warning",
+	failed: "error",
+	lost: "error",
+	review: "accent",
+	working: "success",
+	queued: "dim",
+};
+
+/**
+ * Mirrors foreman_age_human in bin/foreman-lib.sh, so the chrome and `crew`
+ * never disagree about how old a report is. `?` means unreadable, never zero.
+ */
+function ageOf(at: string): string {
+	const then = Date.parse(at);
+	if (!at || !Number.isFinite(then)) return "?";
+	const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+	if (secs < 60) return `${secs}s`;
+	if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+	if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
+	return `${Math.floor(secs / 86400)}d`;
+}
+
+function rankOf(row: CrewRow): number {
+	return STATE_RANK.get(row.state) ?? STATE_ORDER.length;
+}
 
 function readBoard(): CrewRow[] {
 	let names: string[];
@@ -493,6 +530,7 @@ function readBoard(): CrewRow[] {
 			rows.push({
 				id,
 				state: /^state=(.*)$/m.exec(raw)?.[1] ?? "unknown",
+				at: /^at=(.*)$/m.exec(raw)?.[1] ?? "",
 				note: /^note=(.*)$/m.exec(raw)?.[1] ?? "",
 			});
 		} catch {
@@ -546,14 +584,28 @@ function updateChrome(ctx: ExtensionContext) {
 		return;
 	}
 
+	const theme = ctx.ui.theme;
+	const fg = (color: "warning" | "error" | "accent" | "success" | "dim" | "muted", text: string): string =>
+		typeof theme?.fg === "function" ? theme.fg(color, text) : text;
+
 	const counts = new Map<string, number>();
 	for (const row of rows) counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
+	// A blocked row whose note opens with `[key]` is a decision the captain owes:
+	// that prefix is what the fold writes for an open keyed decision. Reading it
+	// back avoids folding the event log a second time here, which is how the
+	// chrome and `/crew` would otherwise start disagreeing.
+	const decisions = rows.filter((r) => r.state === "blocked" && r.note.startsWith("[")).length;
+	const otherBlocked = (counts.get("blocked") ?? 0) - decisions;
 	const bits: string[] = [];
-	if (todo.length) bits.push(`todo ${done}/${todo.length}`);
-	for (const state of ["working", "review", "blocked", "queued", "failed", "lost"]) {
+	if (decisions) bits.push(fg("warning", `${decisions} decision${decisions === 1 ? "" : "s"}`));
+	if (otherBlocked) bits.push(fg("warning", `${otherBlocked} blocked`));
+	for (const state of STATE_ORDER) {
+		if (state === "blocked") continue;
 		const n = counts.get(state);
-		if (n) bits.push(`${n} ${state}`);
+		if (n) bits.push(fg(STATE_COLOR[state] ?? "muted", `${n} ${state}`));
 	}
+	// The todo list is a different axis from the crew, so it trails the line.
+	if (todo.length) bits.push(fg("muted", `todo ${done}/${todo.length}`));
 	ctx.ui.setStatus("foreman", bits.join(" · "));
 
 	if (!configFlag("crewWidget", true)) {
@@ -562,11 +614,17 @@ function updateChrome(ctx: ExtensionContext) {
 	}
 	const lines = rows
 		.filter((r) => ACTIVE_STATES.has(r.state))
-		.sort((a, b) => (a.state === b.state ? a.id.localeCompare(b.id) : a.state.localeCompare(b.state)))
+		.sort((a, b) => rankOf(a) - rankOf(b) || a.id.localeCompare(b.id))
 		.slice(0, 6)
-		.map((r) => `${r.id.padEnd(16)} ${r.state.padEnd(8)} ${r.note}`.trimEnd());
+		.map((r) => {
+			const state = fg(STATE_COLOR[r.state] ?? "muted", r.state.padEnd(8));
+			const tail = `${ageOf(r.at).padEnd(4)} ${r.note}`.trimEnd();
+			return `${r.id.padEnd(16)} ${state} ${fg("muted", tail)}`.trimEnd();
+		});
 	for (const item of todo.filter((t) => t.status !== "done").slice(0, Math.max(0, 6 - lines.length))) {
-		lines.push(`${`#${item.seq}`.padEnd(16)} ${item.status.padEnd(8)} ${item.text}`.trimEnd());
+		const state = fg(item.status === "active" ? "accent" : "dim", item.status.padEnd(8));
+		// `-` in the age column keeps a todo row aligned under the crew rows.
+		lines.push(`${`#${item.seq}`.padEnd(16)} ${state} ${fg("muted", `${"-".padEnd(4)} ${item.text}`)}`.trimEnd());
 	}
 	ctx.ui.setWidget("foreman", lines.length ? lines : undefined);
 }

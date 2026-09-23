@@ -219,6 +219,23 @@ The status line and the crew widget are rendered from the task records on a
 local timer and after every tool call. They make no model call and no Herdr call,
 so fleet visibility costs nothing.
 
+The chrome is ordered worst-first. The line leads with the decisions the captain
+owes — `blocked` rows whose note opens with `[key]`, the prefix the fold itself
+writes — then the crew states in the same order the widget uses (`blocked`,
+`failed`, `lost`, `review`, `working`, `queued`), and trails with the todo count,
+which is a different axis. Reading the `[key]` prefix back instead of folding the
+event log a second time is deliberate: a second fold is how two views of one
+board start to disagree.
+
+The widget shows at most six lines: a row per active crew member with its report
+age, then open todo items in any slots left. Each state is coloured by its theme
+role (`warning`, `error`, `accent`, `success`, `dim`), so the chrome reads
+correctly in a light and a dark terminal, and a todo row carries `-` in the age
+column so it stays aligned under the crew. The same role mapping colours the
+status bits; the todo count stays muted. Ages follow the same rule as
+`foreman_age_human` in `bin/foreman-lib.sh`, so the widget and `/crew` never
+disagree about how old a report is.
+
 Session start also injects one line of context — `crew digest: <fleet> ·
 <decisions> · <wakes> · <todo counts>` — built by `crew-digest.sh` from the same
 records. It is sent with `triggerTurn: false` and `display: false`: the model

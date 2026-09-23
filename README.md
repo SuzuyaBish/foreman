@@ -95,10 +95,25 @@ forge remote delivers locally. `crewDelivery` sets which is normal, and
 
 ## The chrome
 
-While a session runs, a status line shows `crew 3 · 1 working · 1 review` and a
-widget lists the active crew above the editor. Both are rendered straight from
-the task records — no Herdr call, no model call, no tokens. `/crew` prints the
-board; `/crew on|off` toggles the widget.
+While a session runs, a status line and a widget sit above the editor. Both are
+rendered straight from the task records — no Herdr call, no model call, no
+tokens. The line leads with what the captain owes and trails with the durable
+queue; the widget is worst-first, shows how long ago each crew last reported, and
+colours each state with its theme role:
+
+```
+1 decision · 1 failed · 1 review · 2 working · todo 3/12
+
+c-authque        blocked  4m   [api] retry policy: fail fast or back off?
+c-ingest         failed   30m  no such host: registry.internal
+c-docs           review   1m   PR #12 waiting to merge
+c-parser         working  7m   splitting the grammar
+#11              open     -    finish the widget
+```
+
+The widget shows at most six lines: one per active crew member, then open todo
+items in the slots that are left. `/crew` prints the whole board; `/crew on|off`
+toggles the widget.
 
 At session start the foreman is also handed one injected line, for example:
 
