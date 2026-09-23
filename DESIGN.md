@@ -77,6 +77,8 @@ foreman/
     config.json          crew settings
     .wake-queue          durable wake rows
     .wake-acked          the highest sequence the foreman has drained
+    handoff.md           the dated note the previous session left
+    .handoff-seen        the timestamp of the last handoff ingested
     BOARD.md             generated status board
 ```
 
@@ -173,6 +175,24 @@ destroyed out from under a live task. `bin/crew-recover.sh` reconciles both:
   records are on disk and their panes are still there.
 
 Recovery runs at session start and never destroys anything.
+
+## Handoff
+
+The durable memory is the board and the todo list; the *narrative* memory is one
+dated note. `.foreman/handoff.md` is written at the end of a session through the
+`crew_handoff` tool and is deliberately kept: nothing is wiped.
+
+What bounds its relevance is its date. The note carries a machine-readable
+`<!-- handoff at=... -->` marker, and `read` prints it only when it is newer than
+`.handoff-seen`, the timestamp of the last note a session ingested. So the note
+from the session that just ended is delivered once at the next start; a note the
+next session never replaces falls behind the marker and is skipped rather than
+replayed into every future session. `show` always reads it back on demand.
+
+This is why there are two documents and not one: `foreman/HANDOFF.md` is the
+standing architecture/traps doc that must survive being read, while
+`.foreman/handoff.md` is the dated, single-use narrative. One file would keep
+trying to wipe the part that is still useful.
 
 ## Lavish review boards
 

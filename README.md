@@ -152,6 +152,18 @@ Wakes are durable too: rows are appended before anything is announced and
 acknowledged by sequence, so a crash, a restart, or a session replacement cannot
 lose them. A new session re-presents whatever is still unacknowledged.
 
+## Handoff
+
+Memory across sessions is a note, not the transcript. Before a session ends the
+foreman writes a short dated handoff with `crew_handoff`: what is in flight, what
+was decided, what is waiting. The next session is handed it once, at start —
+nothing is wiped, and a note the next session never replaces is skipped rather
+than replayed forever. `crew_handoff` with no text reads the current note back on
+demand.
+
+That note is separate from `foreman/HANDOFF.md`, which is the standing
+architecture and traps doc: kept and edited, never consumed.
+
 ## Busy state
 
 Herdr knows whether a pane exists, not whether the agent in it is mid-turn.
@@ -210,6 +222,7 @@ production code path.
 | `bin/crew-projects.sh` / `bin/crew-models.sh` | resolve names |
 | `bin/crew-doctor.sh [--quiet]` | check the machine before a session |
 | `bin/crew-digest.sh` | the one-line session-start digest |
+| `bin/crew-handoff.sh write\|read\|show` | the dated note for the next session |
 | `bin/crew-config.sh` | show / set crew settings |
 | `bin/crew-worktree.sh add\|remove` | the git worktree mechanics |
 | `bin/crew-trust.sh <path>` | pi folder trust for a path |

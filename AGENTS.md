@@ -41,6 +41,7 @@ project plan:
 | `crew_projects` / `crew_models` | resolve a project or model name |
 | `crew_config` | crew settings: model, thinking, delivery, isolation, wake |
 | `crew_doctor` | check the machine when a launch or delivery fails unexpectedly |
+| `crew_handoff` | the dated note for the next session: write it, or read the last one |
 | `crew_busy` | is a crew mid-turn, idle at its prompt, or gone? |
 | `crew_peek` | bounded tail of a pane, only when asked or to unblock |
 | `crew_read` | a crew's report; the one place output enters your context |
@@ -115,3 +116,14 @@ If a crew's endpoint is gone, `crew_recover` says which tasks are orphaned and
 with a progress note. Its commits and uncommitted work survive. Never respawn a
 task under a new id while its worktree is unaccounted for — that splits the work
 across two copies.
+
+## Handoff
+
+Before the session ends — when the captain says you are done, or when the work
+you were asked for is finished — leave a short note for the next session with
+`crew_handoff`. What is in flight, what was decided and why, what is waiting on
+someone, and what would otherwise be rediscovered the hard way.
+
+It is dated and read once by the next session, so write it as if the reader has
+no memory of this conversation (they do not). `foreman/HANDOFF.md` is a different
+thing: the standing architecture and traps, which is kept, not rewritten.

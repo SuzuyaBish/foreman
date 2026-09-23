@@ -389,6 +389,23 @@ const crewDoctor = one(
 	() => [],
 );
 
+const crewHandoff = one(
+	"crew_handoff",
+	"Session handoff",
+	"The dated note one session leaves for the next: what is in flight, what was decided, " +
+		"and what a fresh session would otherwise have to rediscover. Call with text to write " +
+		"it — do that before the session ends — or with no text to read back the note on " +
+		"disk. It is never wiped; the next session ingests it once, and only while it is the " +
+		"previous session's.",
+	Type.Object({
+		text: Type.Optional(
+			Type.String({ description: "The handoff body; omit it to read the note back" }),
+		),
+	}),
+	"crew-handoff.sh",
+	(p) => (p.text ? ["write", p.text] : ["show"]),
+);
+
 // --- Lavish ----------------------------------------------------------------
 
 const lavishOpen = one(
@@ -637,6 +654,7 @@ export default function foreman(pi: ExtensionAPI) {
 		crewRecover,
 		crewWakeDrain,
 		crewDoctor,
+		crewHandoff,
 		lavishOpen,
 		lavishPoll,
 	]) {
@@ -675,6 +693,20 @@ export default function foreman(pi: ExtensionAPI) {
 			if (!report.startsWith("crew-doctor: ok")) ctx.ui.notify(report, "warning");
 		} catch (error) {
 			ctx.ui.notify(`crew-doctor: ${String(error)}`, "warning");
+		}
+		// The note the previous session left, if this is the next one: dated, ingested
+		// once, never wiped. `read` is quiet when the note is old. (The runner turns
+		// empty output into this sentinel, which is how "nothing to ingest" looks.)
+		try {
+			const note = await run("crew-handoff.sh", ["read"], 4000);
+			if (note && note !== "(no output)") {
+				pi.sendMessage(
+					{ customType: "crew-handoff", content: note, display: false },
+					{ triggerTurn: false },
+				);
+			}
+		} catch {
+			/* no note to ingest */
 		}
 		// Open the session oriented: one line of fleet and todo state, injected
 		// into context without spending a turn or cluttering the transcript.
