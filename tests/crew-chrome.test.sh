@@ -97,6 +97,9 @@ process.env.FOREMAN_HOME = home;
 
 const status = [];
 const widget = [];
+// Where a command's output lands. Recording notify is what proves the proposals
+// view (and anything else a command prints) actually reached the captain.
+const notifications = [];
 // What the toggle asked pi to redraw. Pi re-runs every assistant row's layout
 // when its hidden-thinking label is set, so this records both that the request
 // happened and that the fake rows actually re-laid out from it.
@@ -118,7 +121,9 @@ const ui = {
 		redraws.push(label === "" ? "calm-on" : label === undefined ? "calm-off" : "labelled");
 		for (const component of AssistantMessageComponent.instances) component.invalidate();
 	},
-	notify: () => {},
+	notify: (text) => {
+		notifications.push(text);
+	},
 	theme,
 };
 const ctx = { hasUI: true, ui, mode: "tui" };
@@ -177,6 +182,19 @@ process.stdout.write(`COMPLETE_ON|${completeValues("on")}\n`);
 process.stdout.write(`COMPLETE_OFF|${completeValues("off")}\n`);
 process.stdout.write(`COMPLETE_MISS|${completeValues("zzz")}\n`);
 process.stdout.write(`COMPLETE_CALM_OFF_DESC|${completeDescs("calm")}\n`);
+process.stdout.write(`COMPLETE_P|${completeValues("p")}\n`);
+process.stdout.write(`COMPLETE_PROPOSALS|${completeValues("proposals")}\n`);
+process.stdout.write(`COMPLETE_PROPOSALS_SPACE|${completeValues("proposals ")}\n`);
+
+// --- /crew proposals -------------------------------------------------------
+// The captain reads the suggestions himself. The view shells out to the table
+// itself; notify is where a command's output lands, so recording it is what
+// proves the rows reached him. Newlines are folded so one line is the table.
+const oneLine = (text) => String(text ?? "").replace(/\n/g, "\\n");
+await commands.crew.handler("proposals", ctx);
+process.stdout.write(`PROPOSALS|${oneLine(notifications[notifications.length - 1])}\n`);
+await commands.crew.handler("proposals all", ctx);
+process.stdout.write(`PROPOSALS_ALL|${oneLine(notifications[notifications.length - 1])}\n`);
 
 // --- calm mode and assistant thinking -------------------------------------
 // Pi lays a message out through the exported AssistantMessageComponent, whose
@@ -260,6 +278,9 @@ process.stdout.write(`CALM_RELOAD|${callLines(second.tools.crew_list, { action: 
 fs.writeFileSync(path.join(home, "config.json"), '{"crewWidget":false}');
 await handlers.tool_execution_end({}, ctx);
 process.stdout.write(`OFF|${last(widget) === undefined ? "(none)" : "still-shown"}\n`);
+// The status line is not the widget: with the widget off, a proposal is still
+// counted where the captain can see it.
+process.stdout.write(`OFF_STATUS|${last(status) ?? ""}\n`);
 JS
 
 fm_home >/dev/null
@@ -484,13 +505,17 @@ field() { # <NAME> -> the value printed as `NAME|value`
 # palette. The handler and the completion list now read one table; this pins the
 # grammar, the prefix filtering, and that a calm description is state-aware.
 test_the_crew_command_completes_its_arguments() {
-  assert_equals "on,off,calm,calm on,calm off" "$(field COMPLETE_EMPTY)" "an empty prefix offers every argument"
+  assert_equals "on,off,calm,calm on,calm off,proposals,proposals all" "$(field COMPLETE_EMPTY)" "an empty prefix offers every argument"
   assert_equals "calm,calm on,calm off" "$(field COMPLETE_C)" "c filters to the calm family"
   assert_equals "calm,calm on,calm off" "$(field COMPLETE_CALM)" "calm offers its on/off refinements"
   assert_equals "calm on,calm off" "$(field COMPLETE_CALM_SPACE)" "a trailing space offers on and off"
   assert_equals "on" "$(field COMPLETE_ON)" "on offers itself"
   assert_equals "off" "$(field COMPLETE_OFF)" "off offers itself"
   assert_equals "(none)" "$(field COMPLETE_MISS)" "a prefix that matches nothing returns null"
+  # The proposals family completes from the same table the handler dispatches.
+  assert_equals "proposals,proposals all" "$(field COMPLETE_P)" "p filters to the proposals family"
+  assert_equals "proposals,proposals all" "$(field COMPLETE_PROPOSALS)" "proposals offers its all refinement"
+  assert_equals "proposals all" "$(field COMPLETE_PROPOSALS_SPACE)" "a trailing space offers all"
 
   # Honest, state-aware descriptions: the entry says what it will do from here.
   assert_contains "$(field COMPLETE_CALM_OFF_DESC)" "calm:turn calm mode on" "calm says it will turn calm on while it is off"
@@ -685,7 +710,7 @@ test_an_enormous_item_is_truncated_and_keeps_the_budget() {
 # to appear when proposals exist and stay absent when they do not, and the
 # widget's six-line budget and relevance ordering must survive them untouched.
 test_a_proposal_is_counted_apart_and_never_a_captain_row() {
-  local h out status widget bits todo proposed lines
+  local h out status widget bits todo proposed lines prop propall offstatus
   h=$(fm_tmproot chrome-proposals)/home
   mkdir -p "$h/tasks/c-alpha"
   printf 'state=working\nat=%s\nnote=busy\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/c-alpha/status"
@@ -712,9 +737,23 @@ test_a_proposal_is_counted_apart_and_never_a_captain_row() {
   assert_not_contains "$widget" "add a metrics tab" "a proposal never renders as a captain row"
   assert_not_contains "$widget" "#2" "a proposal number is not a captain row either"
 
+  # Held apart is not hidden: he reads them himself with /crew proposals, which
+  # prints the same table the foreman's crew_todo tool reads. The count also
+  # survives the widget being turned off, so a proposal is never invisible.
+  prop=$(printf '%s\n' "$out" | sed -n 's/^PROPOSALS|//p' | head -1)
+  propall=$(printf '%s\n' "$out" | sed -n 's/^PROPOSALS_ALL|//p' | head -1)
+  offstatus=$(printf '%s\n' "$out" | sed -n 's/^OFF_STATUS|//p' | head -1)
+  assert_contains "$prop" "PROPOSED" "the proposals view prints the table"
+  assert_contains "$prop" "2    add a metrics tab" "the proposals view names the proposal number"
+  assert_contains "$prop" "add a metrics tab" "the proposals view shows the proposal text"
+  assert_contains "$prop" "we may need numbers" "the proposals view shows the reason"
+  assert_contains "$prop" "prefetch the index" "every proposal in the scope is listed"
+  assert_contains "$propall" "add a metrics tab" "the all view lists proposals from every scope"
+  assert_contains "$offstatus" "2 proposed" "the count stays visible with the widget off"
+
   lines=$(printf '%s\n' "$widget" | grep -c .)
   [ "$lines" -le 6 ] || fail "the widget grew past its budget ($lines lines)"
-  pass "a proposal is counted apart and never takes a captain's row"
+  pass "a proposal is counted apart, readable on demand, and never takes a captain's row"
 }
 
 test_the_status_line_leads_with_what_is_owed

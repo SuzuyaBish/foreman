@@ -1038,8 +1038,10 @@ function updateChrome(ctx: ExtensionContext) {
 	// foreman's own suggestion, not the captain's work, so it is filtered out of
 	// `todo` — the captain's board — before anything renders it. The widget cannot
 	// show one, and `crew-todo.sh list` skips `proposed` for the same reason. A
-	// proposal surfaces only as the separate count on the status line below, and
-	// `crew_todo proposals` is where the suggestions themselves are read.
+	// proposal surfaces only as the separate count on the status line below; the
+	// captain reads the table itself with `/crew proposals` (or `proposals all`),
+	// which shells out to the same `crew-todo.sh proposals` the foreman's
+	// `crew_todo` tool reads. Held apart, never hidden.
 	const todo = allTodo.filter((t) => (t.scope || "foreman") === scope && t.status !== "proposed");
 	const proposed = allTodo.filter((t) => (t.scope || "foreman") === scope && t.status === "proposed");
 	const done = todo.filter((t) => t.status === "done").length;
@@ -1104,7 +1106,8 @@ function updateChrome(ctx: ExtensionContext) {
 	// Proposals are absent from `todo` by construction (see the top of
 	// updateChrome), so no suggestion can ever take a line from the captain's
 	// board. The widget is the captain's alone; the `N proposed` count on the
-	// status line is the only place one shows.
+	// status line is the only chrome trace, and `/crew proposals` is how the
+	// captain reads the suggestions themselves.
 	const crewShown = rows
 		.filter((r) => ACTIVE_STATES.has(r.state))
 		.sort((a, b) => rankOf(a) - rankOf(b) || a.id.localeCompare(b.id));
@@ -1361,12 +1364,32 @@ export default function foreman(pi: ExtensionAPI) {
 				ctx.ui.notify("calm mode off", "info");
 			},
 		},
+		{
+			// The captain's own read of the suggestions held apart from his board.
+			// It shells out to the same `crew-todo.sh proposals` the foreman's
+			// `crew_todo` tool reads, so the two views can never disagree. A
+			// proposal still never gains a widget row (updateChrome filters it
+			// out); this command is how it is read instead.
+			value: "proposals",
+			describe: () => "read the proposals held apart from the board",
+			run: async (ctx) => {
+				ctx.ui.notify(await run("crew-todo.sh", ["proposals"], 6000), "info");
+			},
+		},
+		{
+			value: "proposals all",
+			describe: () => "read proposals from every scope",
+			run: async (ctx) => {
+				ctx.ui.notify(await run("crew-todo.sh", ["proposals", "--all"], 6000), "info");
+			},
+		},
 	];
 
 	pi.registerCommand("crew", {
 		description:
 			"Show the crew board and todo list; /crew on|off toggles the widget; " +
-			"/crew calm on|off toggles calm mode",
+			"/crew calm on|off toggles calm mode; /crew proposals reads the " +
+			"suggestions held apart from the board",
 		handler: async (args, ctx) => {
 			const arg = (args ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 			const entry = crewArgs().find((a) => a.value === arg);

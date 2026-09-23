@@ -514,6 +514,23 @@ the same rule as `foreman_age_human` in `bin/foreman-lib.sh`, so the widget and
 read the same grammar table its handler dispatches, so the palette and the
 command cannot drift.
 
+Proposals are a second tier and are the one thing deliberately kept out of the
+captain's board. A proposal is the foreman's own suggestion, not the captain's
+work, so `updateChrome` filters `proposed` out of the captain's items before
+anything renders it: a suggestion can never take a widget row or a line from
+the captain's own queue, and no suggestion can be mistaken for work they asked
+for. The status line counts them in their own muted bit (`2 proposed`) when
+there are any, and that count is the only chrome trace. It is deliberately
+*not* a row, and counting is not showing: reading them is the captain's own
+act. `/crew proposals` prints the table for the scope in focus and `/crew
+proposals all` for every scope, shelling out to the same `crew-todo.sh
+proposals` the foreman's `crew_todo` tool reads, so the captain's view and the
+foreman's cannot disagree. The `proposals` entries live in the same
+`crewArgs()` grammar table as `on`/`off`/`calm`, so the palette and the handler
+stay one source of truth. The count stays on the status line even when the
+widget is off, because a count is not a row — a proposal is never invisible,
+and the widget is still the captain's alone.
+
 Session start also injects one line of context — `crew digest: <fleet> ·
 <decisions> · <wakes> · <todo counts>` — built by `crew-digest.sh` from the same
 records. It is sent with `triggerTurn: false` and `display: false`: the model
