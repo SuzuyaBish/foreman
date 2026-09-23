@@ -29,6 +29,12 @@ Starts `pi` in this directory with the crew tools loaded. The first thing you
 type is a message to your foreman. You never run the other commands below by
 hand unless you want to.
 
+The chrome and the crew tools belong to this session only. The extension is not
+installed in pi, so a plain `pi` session — even after a reload — has no widget,
+no status line, no `crew_*` tools and no digest. That is deliberate: installing
+it globally would start its auto-wake watcher in every session, in every
+project. Start the foreman to see the chrome.
+
 Every session starts the same way: the foreman reads `foreman/HANDOFF.md` (the
 standing architecture and traps) and then `crew_todo` (the durable plan), as
 `AGENTS.md` instructs. It is also handed a one-line `crew digest:` and, once,
