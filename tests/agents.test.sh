@@ -100,6 +100,15 @@ test_the_todo_section_holds_suggestions_for_approval() {
   assert_contains "$todo" "table" "proposals are shown to the captain as a table"
   assert_contains "$todo" "explicit request" "an explicit request from the captain goes straight on the board"
   assert_contains "$todo" "never assumed" "approval is the captain's and is never assumed"
+  # A proposal that is only described to the captain does not exist: the tool
+  # call is the act that files it, and claiming otherwise is the failure this
+  # rule prevents. If these lines go, "I filed it" can mean prose while the
+  # queue stays empty - the proposal is invisible and lost. Pin the tool name,
+  # the same-turn requirement, and that prose alone files nothing.
+  assert_contains "$todo" "exists only once" "the todo section says a proposal exists only once it is filed"
+  assert_contains "$todo" "crew_todo propose" "the todo section names the tool call that files a proposal"
+  assert_contains "$todo" "files nothing" "describing a proposal in prose files nothing"
+  assert_contains "$todo" "same turn" "the filing call must be made in the same turn as the intent"
   pass "the todo section holds the foreman's suggestions for the captain's approval"
 }
 

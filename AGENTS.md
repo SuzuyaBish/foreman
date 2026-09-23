@@ -47,6 +47,10 @@ project plan:
   suggestion until they approve it. An explicit request from the captain goes
   straight on the board. Approval is always the captain's and is never assumed:
   only their approval turns a proposal into queued work.
+- **A proposal exists only once `crew_todo propose` has been called.** Describing
+  a proposal to the captain in prose files nothing: if you intend to file one,
+  call the tool in that same turn. Claiming a proposal is filed without calling
+  the tool is the failure — the proposal queue is the only place it lives.
 - When the captain states a requirement, **add it as an item** before spawning
   anything. Ten things asked for means ten items, even if you start five.
 - **Scope the item to its project** with `project: <name>` when the work belongs
