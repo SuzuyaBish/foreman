@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""Render the foreman README banner (the title-card artwork, at banner size).
+"""Render foreman's title card at either committed size.
 
-This is the recipe for `assets/banner.png`. It is the same composition as the
-repo's social-preview card (`assets/social-preview.png`, 1280x640), re-rendered
-at banner resolution so the wordmark and the engraving stay crisp in the README
-instead of being upscaled by the browser.
+One composition, two committed outputs, one tagline:
+
+    python3 assets/render.py banner        # assets/banner.png          2560x1280
+    python3 assets/render.py banner 2048   # any even width; height is width / 2
+    python3 assets/render.py card          # assets/social-preview.png  1280x640
+
+The README banner and the GitHub social-preview card are the same title card --
+the FOREMAN wordmark over the public-domain Gray's fig. 557 head plate -- drawn
+at two sizes. They are folded into one recipe on purpose: they had drifted before
+(the banner read a shortened tagline the captain never chose), and with a single
+`TAGLINE` constant they cannot drift in wording again. The card's size is fixed
+at 1280x640; the banner takes any even width so the README can ask for extra
+resolution.
 
 It is deliberately offline: it reads the plate from this directory and never
-touches the network. Run it from anywhere:
-
-    python3 assets/render-banner.py            # writes assets/banner.png at 2560x1280
-    python3 assets/render-banner.py 2048       # any even width; height is width/2
+touches the network. Run it from the repo root or anywhere else.
 
 Plate source and licence
 ------------------------
@@ -21,17 +27,17 @@ Plate source and licence
   Licence: Public domain (published 1918; author died 1861, PD worldwide).
   Local copy: assets/gray-fig557.jpg (1788x2118).
 
-The artwork is public domain, so the banner and the plate may both be
+The artwork is public domain, so both outputs and the plate may be
 redistributed. No show logo, stills, likenesses or show fonts are used; the type
 is rendered from the same system fonts as the social card.
 
-Why 2560 px wide
-----------------
+Why the banner is 2560 px wide
+------------------------------
 GitHub's markdown column is ~1012 CSS px. On a 2x display that is ~2024 device
 pixels, so a 1280 px card is upscaled. 2560 gives ~2.5x and headroom. The plate
-puts the head at 1.18 * canvas height, so a 1280-tall banner needs a 1510 px
-head from a 2118 px plate: the plate is still being downscaled (~0.71x), so the
-banner is not upscaled anywhere.
+puts the head at 1.18 * canvas height, so a 1280-tall banner needs a 1510 px head
+from a 2118 px plate: the plate is still being downscaled (~0.71x), so the banner
+is not upscaled anywhere.
 """
 import os
 import sys
@@ -40,11 +46,16 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLATE = os.path.join(HERE, "gray-fig557.jpg")
-OUT = os.path.join(HERE, "banner.png")
+BANNER = os.path.join(HERE, "banner.png")
+CARD = os.path.join(HERE, "social-preview.png")
 
-# Base design is the 1280x640 social card; every dimension scales from it.
+# The captain's line, verbatim. Both outputs draw exactly this string.
+TAGLINE = "I don't treat. I diagnose, then hand the case to the crew."
+
+# Base design is the 1280x640 card; every dimension scales from it.
 BASE_W, BASE_H = 1280, 640
 HEAD_RATIO = 1.18  # head plate height as a multiple of the canvas height
+TAG_SIZE = 20      # mono px for the tagline, at the 1280-wide base design
 
 BG = (9, 10, 12)
 INK = (236, 232, 225)
@@ -99,7 +110,17 @@ def tracked(draw, xy, text, fnt, fill, tracking=0):
     return x
 
 
-def render(width=2560):
+def tag_metrics(width, tagline=TAGLINE, tag_size=TAG_SIZE):
+    """Where the tagline lands at `width`: (start x, rendered width, end x, font px)."""
+    s = (width // 2) / BASE_H
+    f = font(MONO, tag_size * s)
+    draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    x = int(76 * s)
+    w = draw.textlength(tagline, font=f)
+    return x, w, x + w, f.size
+
+
+def render(width=2560, tagline=TAGLINE, tag_size=TAG_SIZE):
     """The title-card composition, at `width` px (height = width / 2)."""
     width = int(width)
     height = width // 2
@@ -117,15 +138,15 @@ def render(width=2560):
     x = int(76 * s)
     f_top = font(MONO, 20 * s)
     f_word = font(SERIF_B, 104 * s)
-    f_tag = font(MONO, 20 * s)
+    f_tag = font(MONO, tag_size * s)
     track = 2 * s
     d.text((x, int(150 * s)), "// a captain -> foreman -> crew harness",
            font=f_top, fill=DIM)
     y = int(196 * s)
-    end = tracked(d, (x, y), "FOREMAN", f_word, INK, tracking=track)
+    tracked(d, (x, y), "FOREMAN", f_word, INK, tracking=track)
     d.line([(x, int(324 * s)), (x + int(300 * s), int(324 * s))],
            fill=RED, width=max(1, int(round(3 * s))))
-    d.text((x, int(346 * s)), "I don't treat. I diagnose.", font=f_tag, fill=GREY)
+    d.text((x, int(346 * s)), tagline, font=f_tag, fill=GREY)
     d.text((x, height - int(60 * s)),
            "parallel crew . isolated worktrees . flat context", font=font(MONO, 17 * s),
            fill=FOOT)
@@ -138,8 +159,28 @@ def save_optimized(im, path):
     pal.save(path, "PNG", optimize=True)
 
 
+def _emit(im, path, tagline, tag_size, width):
+    x0, tw, x1, fpx = tag_metrics(width, tagline, tag_size)
+    save_optimized(im, path)
+    print(f"wrote {path} {im.width}x{im.height}; "
+          f"tagline {fpx}px mono, x {x0}..{x1} ({tw:.1f}px wide)")
+
+
+def main(argv):
+    target = argv[1] if len(argv) > 1 else "banner"
+    if target == "banner":
+        width = int(argv[2]) if len(argv) > 2 else 2560
+        im = render(width)
+        _emit(im, BANNER, TAGLINE, TAG_SIZE, width)
+        return 0
+    if target == "card":
+        im = render(BASE_W)
+        _emit(im, CARD, TAGLINE, TAG_SIZE, BASE_W)
+        return 0
+    sys.stderr.write(f"unknown target: {target!r}\n")
+    sys.stderr.write("usage: render.py banner [width] | card\n")
+    return 2
+
+
 if __name__ == "__main__":
-    w = int(sys.argv[1]) if len(sys.argv) > 1 else 2560
-    im = render(w)
-    save_optimized(im, OUT)
-    print(f"wrote {OUT} {im.width}x{im.height}")
+    sys.exit(main(sys.argv))

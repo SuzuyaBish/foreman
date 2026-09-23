@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="foreman - a captain to foreman to crew harness. I don't treat. I diagnose." src="assets/banner.png" width="100%" />
+  <img alt="foreman - a captain to foreman to crew harness. I don't treat. I diagnose, then hand the case to the crew." src="assets/banner.png" width="100%" />
 </p>
 
 # foreman
