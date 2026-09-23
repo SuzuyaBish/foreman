@@ -56,6 +56,10 @@ nothing is discarded when the pane closes.
 `projects/` is gitignored, so cloned repositories never enter this repo's
 history.
 
+A worktree is cut from the project's `HEAD`, so uncommitted work in that
+checkout is not carried into it. Spawning warns when that would happen, naming
+the count of modified/staged and untracked files, and goes ahead anyway.
+
 ## Crew settings
 
 Told conversationally ("run the crew on X, thinking high"), persisted in

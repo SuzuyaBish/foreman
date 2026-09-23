@@ -147,6 +147,21 @@ test_double_dash_and_model_options() {
   pass "task text and per-crew model options are handled"
 }
 
+test_spawn_surfaces_uncommitted_checkout_work() {
+  local proj out
+  proj="$FOREMAN_PROJECTS/dirtysource"
+  fm_git_repo "$proj" --origin >/dev/null
+  fm_gh_stub >/dev/null
+  printf 'local edit\n' >>"$proj/seed.txt"
+
+  out=$("$SPAWN" dirty-src --project dirtysource "isolated task" 2>&1)
+  assert_contains "$out" "uncommitted work" "spawn surfaces the worktree warning"
+  assert_contains "$out" "will not carry it" "the warning states the consequence"
+  assert_contains "$out" "launched dirty-src" "the spawn still goes ahead"
+  assert_present "$FOREMAN_WORKTREES/dirty-src/.git" "the worktree was created anyway"
+  pass "an isolated spawn tells the foreman what the worktree will not carry"
+}
+
 test_workspace_resolution() {
   local dir
   dir=$(fm_tmproot workspace)
@@ -169,4 +184,5 @@ test_isolation_uses_a_worktree
 test_project_without_isolation
 test_arguments_are_validated
 test_double_dash_and_model_options
+test_spawn_surfaces_uncommitted_checkout_work
 test_workspace_resolution

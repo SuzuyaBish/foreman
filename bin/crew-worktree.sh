@@ -11,6 +11,22 @@ set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"
 
+# A worktree is cut from a commit ($BASE, HEAD by default). Anything the project
+# checkout has not committed is not in that commit, so the crew cannot see it.
+# Say so before the launch reads as if the crew inherited the captain's desk.
+worktree_warn_source_dirty() { # <project> <base>
+  local proj=$1 base=$2 status tracked untracked note
+  status=$(git -C "$proj" status --porcelain 2>/dev/null) || return 0
+  [ -n "$status" ] || return 0
+  tracked=$(printf '%s\n' "$status" | awk '$0 !~ /^\?\?/' | wc -l | tr -d ' ')
+  untracked=$(printf '%s\n' "$status" | awk '$0 ~ /^\?\?/' | wc -l | tr -d ' ')
+  note=
+  [ "$tracked" -gt 0 ] && note="$tracked modified/staged"
+  [ "$untracked" -gt 0 ] && note="${note:+$note, }$untracked untracked"
+  printf 'warning: %s has uncommitted work (%s); the worktree cut from %s will not carry it\n' \
+    "$proj" "$note" "$base" >&2
+}
+
 ACTION=${1:-}
 case "$ACTION" in
 add)
@@ -45,6 +61,7 @@ add)
   mkdir -p "$FOREMAN_WORKTREES"
   git -C "$PROJ" worktree add -b "$BRANCH" "$WT" "$BASE" >/dev/null 2>&1 ||
     foreman_die "git worktree add failed for $PROJ"
+  worktree_warn_source_dirty "$PROJ" "$BASE"
   printf '%s\n' "$WT"
   ;;
 remove)

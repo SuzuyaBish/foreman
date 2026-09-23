@@ -70,6 +70,45 @@ test_add_refuses_bad_input() {
   pass "bad projects, ids and bases are refused"
 }
 
+test_add_warns_about_uncommitted_project_work() {
+  local proj out err
+  proj="$FOREMAN_PROJECTS/warnrepo"
+  fm_git_repo "$proj" >/dev/null
+
+  # A clean checkout has nothing the worktree would miss.
+  err=$("$WT" add warnrepo clean-1 2>&1 >/dev/null)
+  assert_equals "" "$err" "a clean checkout is not warned about"
+
+  printf 'edited\n' >>"$proj/seed.txt"
+  printf 'staged\n' >"$proj/staged.txt"
+  git -C "$proj" add staged.txt
+  printf 'new\n' >"$proj/untracked.txt"
+
+  err=$("$WT" add warnrepo dirty-1 2>&1 >/dev/null)
+  assert_contains "$err" "uncommitted work" "the warning names the problem"
+  assert_contains "$err" "2 modified/staged, 1 untracked" "the warning counts what will be left behind"
+  assert_contains "$err" "$proj" "the warning names the checkout"
+
+  # The warning must not corrupt the machine-readable path on stdout.
+  out=$("$WT" add warnrepo dirty-2 2>/dev/null)
+  assert_equals "$FOREMAN_WORKTREES/dirty-2" "$out" "the warning stays on stderr"
+
+  # And it is telling the truth: the worktree is cut from the commit.
+  assert_absent "$FOREMAN_WORKTREES/dirty-1/untracked.txt" "untracked work is not carried"
+  assert_absent "$FOREMAN_WORKTREES/dirty-1/staged.txt" "staged work is not carried"
+  assert_equals "seed" "$(cat "$FOREMAN_WORKTREES/dirty-1/seed.txt")" "a modified file is at its committed content"
+
+  # Untracked-only is called out without pretending files were edited.
+  local proj2
+  proj2="$FOREMAN_PROJECTS/untrackedrepo"
+  fm_git_repo "$proj2" >/dev/null
+  printf 'new\n' >"$proj2/untracked.txt"
+  err=$("$WT" add untrackedrepo u-1 2>&1 >/dev/null)
+  assert_contains "$err" "1 untracked" "an untracked-only checkout is reported"
+  assert_not_contains "$err" "modified/staged" "no tracked edits are invented"
+  pass "a worktree warns when it is cut from a checkout with uncommitted work"
+}
+
 test_remove_protects_uncommitted_work() {
   local proj wt
   proj="$FOREMAN_PROJECTS/remove"
@@ -106,5 +145,6 @@ test_add_creates_worktree_and_branch
 test_add_can_start_from_another_base
 test_add_is_single_use
 test_add_refuses_bad_input
+test_add_warns_about_uncommitted_project_work
 test_remove_protects_uncommitted_work
 test_remove_uses_recorded_metadata

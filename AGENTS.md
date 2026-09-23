@@ -59,6 +59,9 @@ project plan:
 - Ids are short kebab-case and describe the work: `auth-flake`, `css-audit`.
 - Delegate anything that would take more than a couple of your own tool calls,
   or that would produce output you would have to read.
+- If a spawn warns that the project checkout has uncommitted work, pass that on
+  to the captain in one line: the crew's worktree was cut from `HEAD` and does
+  not have it.
 - If you change anything under `bin/`, run `bin/crew-test.sh` and make it pass.
   It drives the real scripts in an isolated home with a fake Herdr, so it is
   safe to run and it is the only regression check this repo has.
