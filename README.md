@@ -268,8 +268,10 @@ item with no crew each keep a stated row. Every column has a fixed share and is
 clipped, so a row never wraps.
 
 The widget shows at most six lines. `/crew` prints the whole board, and the
-palette completes its arguments (`on`, `off`, `calm`, `calm on`, `calm off`);
-`/crew on|off` toggles the widget. `/crew calm on|off` toggles **calm mode**,
+palette completes its arguments (`on`, `off`, `calm`, `calm on`, `calm off`,
+`proposals`, `proposals all`); `/crew on|off` toggles the widget, and
+`/crew proposals` reads the suggestions held apart from the board (below).
+`/crew calm on|off` toggles **calm mode**,
 which hides the foreman's own tool calls — the call line, its arguments and its
 output — and assistant thinking, so the captain reads only the responses. It
 never touches the responses, the status line, the widget or the wake message.
@@ -331,11 +333,14 @@ you as a table.
 ```
 
 A proposal is a suggestion, not your work, so it never appears among your items
-— not on the board and not in the widget. The status line counts proposals
-separately and only when there are some (`… · todo 3/12 · 2 proposed`), and
-`crew_todo proposals` is where the whole table is read. Approving one promotes
-it to the board and keeps the number you already saw; declining it drops it.
-Both are yours to call: `approve 4` keeps it, `drop 4` lets it go.
+— not on the board and not in the widget. Read them yourself with `/crew
+proposals` (or `/crew proposals all` for every scope); that shells out to the
+same table the foreman's `crew_todo proposals` shows, so the two cannot
+disagree. The status line counts them separately and only when there are some
+(`… · todo 3/12 · 2 proposed`), and that count stays visible even with the
+widget turned off, so a proposal is never invisible. Approving one promotes it
+to the board and keeps the number you already saw; declining it drops it. Both
+are yours to call: `approve 4` keeps it, `drop 4` lets it go.
 
 ## Decisions
 
@@ -610,7 +615,8 @@ None of them spawn, merge, archive, edit or run anything:
 A crew member gets its own tools: `crew_report` (its state, its decision, its
 PR) and `crew_cleanup` (stop what it started, so nothing is left holding a
 port), plus the `lavish_*` pair below. `/crew` prints the board, `/crew on|off`
-toggles the widget.
+toggles the widget, and `/crew proposals` reads the suggestions held apart from
+the board.
 
 ## Pieces
 
