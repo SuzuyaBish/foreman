@@ -284,9 +284,19 @@ test_scopes_keep_projects_apart() {
   out=$("$TODO" list)
   assert_contains "$out" "sheet background" "the focused project's item is listed"
   assert_not_contains "$out" "tidy the chrome" "another project's item is not"
-  local elsewhere
-  elsewhere=$(printf '%s\n' "$out" | sed -n 's/.*open elsewhere: foreman \([0-9][0-9]*\) open.*/\1/p')
+
+  # The tail must count work in flight, not only work queued: an `active` item
+  # in another scope is a crew mid-flight, and a project with one used to
+  # contribute 0 to the count. The label names each status, so the word `open`
+  # is never silently bent to cover `active`.
+  printf '950\tactive\t-\tland the parser\t-\tforeman\n' >>"$FOREMAN_HOME/todo.tsv"
+  out=$("$TODO" list)
+  assert_contains "$out" "elsewhere: foreman" "other-scope work is named, never hidden"
+  local elsewhere active
+  elsewhere=$(printf '%s\n' "$out" | sed -n 's/.*elsewhere: foreman \([0-9][0-9]*\) open.*/\1/p')
   [ -n "$elsewhere" ] && [ "$elsewhere" -ge 1 ] || fail "queued work in another scope is reported with a count (got '$out')"
+  active=$(printf '%s\n' "$out" | sed -n 's/.*elsewhere: foreman .*\([0-9][0-9]*\) active.*/\1/p')
+  [ -n "$active" ] && [ "$active" -ge 1 ] || fail "a crew mid-flight elsewhere is counted as active (got '$out')"
 
   out=$("$TODO" list --all)
   assert_contains "$out" "tidy the chrome" "--all shows every scope"
@@ -300,6 +310,8 @@ test_scopes_keep_projects_apart() {
   out=$("$TODO" summary)
   assert_contains "$out" "Example_App: 1 item (1 open, 0 active, 0 done)" "summary leads with the scope in focus"
   assert_contains "$out" "also foreman" "summary points at queued work elsewhere"
+  assert_contains "$(printf '%s\n' "$out" | sed -n 's/.*also //p')" "active" \
+    "summary counts a crew mid-flight elsewhere too"
   assert_contains "$("$TODO" summary --all)" "all scopes:" "summary --all counts every scope"
 
   if "$TODO" add --project "bad name" nope >/dev/null 2>&1; then fail "a project name with a space was accepted"; fi

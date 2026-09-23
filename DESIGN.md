@@ -423,9 +423,10 @@ it there), else `foreman`. Focus is per session, so two sessions can watch two
 projects.
 
 Nothing is hidden silently: a list reports queued work in other scopes as an
-`open elsewhere: foreman 1 open` line, and the digest, summary and status line
-all name the scope they are counting. `--all` shows every scope, grouped under
-its own heading.
+`elsewhere: foreman 1 open, 2 active` line - naming each status, so `active`
+work in flight is counted and the word `open` is never bent to cover it - and
+the digest, summary and status line all name the scope they are counting.
+`--all` shows every scope, grouped under its own heading.
 
 The scope is written down when the item is added, so a later focus change cannot
 file old history under a new project. A row that predates scopes takes its own
@@ -496,18 +497,32 @@ so fleet visibility costs nothing.
 The chrome is ordered worst-first. The line leads with the decisions the captain
 owes — `blocked` rows whose note opens with `[key]`, the prefix the fold itself
 writes — then the crew states in the same order the widget uses (`blocked`,
-`failed`, `lost`, `review`, `working`, `queued`), and trails with the todo count,
-which is a different axis. Reading the `[key]` prefix back instead of folding the
-event log a second time is deliberate: a second fold is how two views of one
-board start to disagree.
+`failed`, `lost`, `review`, `working`, `queued`). It trails with a per-project
+todo rollup, a different axis: the focus first and marked, then every other
+project with work in flight, worst-first. Each entry is `<project> <done>/<total>`,
+where `total` counts `open` and `active` alike, so a project whose only work is a
+crew mid-flight (its item is `active`) is never zero. The rollup is bounded so
+the line cannot wrap and the projects that did not fit are counted (`+N projects`)
+rather than dropped. Reading the `[key]` prefix back instead of folding the event
+log a second time is deliberate: a second fold is how two views of one board
+start to disagree.
 
-The widget shows at most six lines, one row per crew. A crew row carries the
-number and title of the todo item linked back to it, the crew's own state as the
-single status column, the report age, and the crew's last note as a short
-description of what it is actually doing. An item no active crew is linked to
-keeps its own row with its todo state. Folding the item into the crew's row is
-what keeps one piece of work from wearing two words: `working` and `active` are
-the same moment seen from the crew and from the board, and the row says it once.
+The widget shows at most six lines. The rows are every crew first (worst-first
+across the whole fleet), then the focused board's own queued rows, then queued
+items from every other project with work in flight, worst project first. Every
+row carries its project, so work in another project is never mistaken for the
+focused one and a count is never shown without the project it belongs to. A crew
+row carries the number and title of the todo item linked back to it — looked up
+across every scope, because a crew belongs to the fleet, not to the focused
+board — the crew's own state as the single status column, the report age, and the
+crew's last note as a short description of what it is actually doing. An item no
+active crew is linked to keeps its own row with its todo state. Folding the item
+into the crew's row is what keeps one piece of work from wearing two words:
+`working` and `active` are the same moment seen from the crew and from the board,
+and the row says it once; `-` and `(no todo item)` mean genuinely unlinked and
+nothing else. When the fleet fills the budget the last line states how many rows
+were left out and how many of those were crews rather than the captain's own
+board items, so a busy fleet never silently hides his work.
 A crew settled at its prompt is shown as `idle`, read from the same
 `busy-state`/`busy-gen` records `crew_busy` reads; an unknown record falls back
 to the report state, and the status line's counts stay report states. Each state
@@ -726,9 +741,11 @@ zero-token mechanics. Its shape follows from the design:
   renders every 15s and must not fork a shell to find out which project it is
   looking at. `tests/crew-chrome.test.sh` asserts both resolve the same scope on one
   fixture; if you change the rule, change both and keep that test.
-- Scoping must never *hide* queued work: `list` prints the `open elsewhere:` line
-  and `summary` the `also <scope> N open` tail for exactly that reason. Dropping
-  them would make the board lie by omission.
+- Scoping must never *hide* queued work: `list` prints the `elsewhere:` line
+  and `summary` the `also <scope> N open, M active` tail for exactly that reason.
+  Both count `active` as well as `open` - a crew mid-flight is real work in
+  another project, and a count that read only `open` made a busy project
+  invisible. Dropping the tails would make the board lie by omission.
 - The todo scope field is appended as **field 6** (`<seq> <status> <crew> <text>
   <note> <scope>`), so every awk that rewrites a row keeps it automatically and rows
   written before scopes existed stay parseable. `sync` is the one place that

@@ -367,7 +367,7 @@ fi
 test_the_status_line_leads_with_what_is_owed() {
   assert_contains "$STATUS" "1 decision" "a keyed block reads as a decision"
   assert_contains "$STATUS" "1 blocked" "an unkeyed block reads as blocked"
-  assert_contains "$STATUS" "todo 1/3" "the todo count is shown"
+  assert_contains "$STATUS" "todo ▸foreman 1/3" "the todo count is shown, named by its project"
   assert_contains "$STATUS" "1 failed" "failed is counted"
   assert_contains "$STATUS" "1 review" "review is counted"
   assert_contains "$STATUS" "1 working" "working is counted"
@@ -375,7 +375,7 @@ test_the_status_line_leads_with_what_is_owed() {
   assert_contains "$STATUS" "[[warning]]1 decision" "a decision is a warning"
   assert_contains "$STATUS" "[[error]]1 failed" "a failure is an error"
   assert_contains "$STATUS" "[[accent]]1 review" "a waiting PR is accent"
-  assert_contains "$STATUS" "[[muted]]todo 1/3" "the todo count stays quiet"
+  assert_contains "$STATUS" "[[muted]]todo ▸foreman 1/3" "the todo count stays quiet"
 
   # What the captain owes comes before what is merely in flight, and the todo
   # list — a different axis — trails the crew states.
@@ -384,7 +384,7 @@ test_the_status_line_leads_with_what_is_owed() {
   failed=$(line_of "$STATUS_BITS" "1 failed")
   review=$(line_of "$STATUS_BITS" "1 review")
   work=$(line_of "$STATUS_BITS" "1 working")
-  todo=$(line_of "$STATUS_BITS" "todo 1/3")
+  todo=$(line_of "$STATUS_BITS" "todo ▸foreman 1/3")
   [ -n "$dec" ] && [ -n "$failed" ] && [ -n "$review" ] && [ -n "$work" ] && [ -n "$todo" ] ||
     fail "the status line lost a count: $STATUS"
   [ "$dec" -lt "$failed" ] || fail "a decision must outrank a failure: $STATUS"
@@ -446,11 +446,14 @@ test_the_chrome_is_scoped_to_the_project_in_focus() {
   status=$(printf '%s\n' "$out" | sed -n 's/^STATUS|//p')
   widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
 
-  assert_contains "$status" "todo 0/1 Example_App" "the status line counts the project in focus"
-  assert_contains "$status" "+1 open elsewhere" "queued work in another scope is counted, never hidden"
+  assert_contains "$status" "todo ▸Example_App 0/1" "the status line counts the project in focus first and names it"
+  assert_contains "$status" "foreman 0/1" "another project's work is counted with its name, never hidden"
   assert_not_contains "$status" "proposed" "a board with no suggestions shows no proposal count"
   assert_contains "$widget" "sheet background" "the widget shows the project's item"
-  assert_not_contains "$widget" "tidy the chrome" "the widget does not show another scope's item"
+  assert_contains "$widget" "tidy the chrome" "the widget shows another project's item too"
+  local other
+  other=$(printf '%s\n' "$widget" | grep -F "tidy the chrome")
+  assert_contains "$other" "foreman" "another project's row names its project"
 
   assert_equals "Example_App" "$(FOREMAN_HOME="$h" "$BIN/crew-todo.sh" focus)" \
     "the shell and the chrome resolve the scope the same way"
@@ -478,8 +481,94 @@ test_a_crew_outside_the_focus_keeps_its_item() {
 
   assert_contains "$other" "#42" "a crew outside the focus keeps its item's number"
   assert_contains "$other" "deploy the backend" "a crew outside the focus keeps its item's title"
+  assert_contains "$other" "Example_App" "a crew outside the focus names the project it works in"
   assert_not_contains "$other" "(no todo item)" "a linked crew never claims to have no item"
-  pass "a crew working outside the focus keeps its number and title"
+  pass "a crew working outside the focus keeps its number, title and project"
+}
+
+# The footer names every project with work in flight. A project whose only work
+# is a crew mid-flight (its item is `active`, not `open`) used to contribute 0
+# to the old `+N open elsewhere` tail, so a busy multi-project fleet read as if
+# the other projects were idle. The rollup counts `active` too, names the
+# project, and marks the focus first.
+test_the_chrome_counts_active_work_in_other_scopes() {
+  local h out status widget row
+  h=$(fm_tmproot chrome-active)/home
+  mkdir -p "$h/tasks/c-proj"
+  printf 'project=%s\n' "/tmp/projects/Example_App" >"$h/tasks/c-proj/meta"
+  printf 'state=working\nat=%s\nnote=\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/c-proj/status"
+  printf '1\topen\t-\tsheet background\t-\tExample_App\n2\tactive\tc-beta\tland the parser\t-\tforeman\n' >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  status=$(printf '%s\n' "$out" | sed -n 's/^STATUS|//p')
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  assert_contains "$status" "todo ▸Example_App 0/1" "the focused project leads and is named"
+  assert_contains "$status" "foreman 0/1" "a crew in flight in another project is counted, never 0"
+  assert_not_contains "$status" "elsewhere" "the count is no longer an open-only elsewhere tail"
+  row=$(printf '%s\n' "$widget" | grep -F "c-beta")
+  assert_contains "$row" "foreman" "the crew row names the project it works in"
+  pass "the chrome counts a crew in flight in another scope and names its project"
+}
+
+# The footer rollup is bounded, so a fleet with more projects than fit cannot
+# render every one. What must never happen is a silent cut: the projects that
+# did not fit are counted by name, and the focus still leads even when the line
+# is full. The bound is a conservative width, so the line cannot wrap.
+test_the_footer_bounds_its_project_rollup() {
+  local h out status i tail longest
+  h=$(fm_tmproot chrome-rollup)/home
+  mkdir -p "$h/tasks"
+  printf 'foreman\n' >"$h/focus.default"
+  printf '1\topen\t-\tkeep the harness honest\t-\tforeman\n' >"$h/todo.tsv"
+  for i in 01 02 03 04 05 06 07 08 09 10 11 12; do
+    printf '%s\topen\t-\tship project %s\t-\tproject-%s\n' "$((10#$i + 1))" "$i" "$i" >>"$h/todo.tsv"
+  done
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  status=$(printf '%s\n' "$out" | sed -n 's/^STATUS|//p')
+
+  assert_contains "$status" "todo ▸foreman 0/1" "the focus leads the rollup, marked and named"
+  assert_contains "$status" "projects" "the projects that did not fit are stated"
+  assert_not_contains "$status" "project-12" "a project past the bound is not rendered"
+  tail=$(printf '%s\n' "$status" | sed -n 's/.*+\([0-9][0-9]*\) projects.*/\1/p')
+  [ -n "$tail" ] && [ "$tail" -ge 1 ] || fail "the footer must state how many projects it left out (got '$status')"
+  longest=$(printf '%s\n' "$status" | sed 's/\[\[[^]]*\]\]//g; s/…/./g' | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+  [ "$longest" -le 100 ] || fail "the status line wraps past its bound ($longest columns)"
+  pass "a crowded footer names the projects it left out and never wraps"
+}
+
+# The budget is a hard line cap and the fleet is global, so a busy fleet can
+# fill every row before the focused board gets one. What must never happen is
+# the tail going missing with no trace: the status line counts eight crews while
+# six rows draw, and the captain's own queued item is quietly gone. The last
+# line states how many rows were left out and which part was his board.
+test_the_widget_never_truncates_silently() {
+  local h out widget lines marker i
+  h=$(fm_tmproot chrome-crowded)/home
+  mkdir -p "$h/tasks"
+  printf 'foreman\n' >"$h/focus.default"
+  : >"$h/todo.tsv"
+  for i in 1 2 3 4 5 6 7 8; do
+    printf '%s\tactive\tc-p%s\tship project %s\t-\tp%s\n' "$i" "$i" "$i" "$i" >>"$h/todo.tsv"
+    mkdir -p "$h/tasks/c-p$i"
+    printf 'project=%s\n' "/tmp/projects/p$i" >"$h/tasks/c-p$i/meta"
+    printf 'state=working\nat=%s\nnote=in flight\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/c-p$i/status"
+  done
+  printf '99\topen\t-\ttidy the chrome\t-\tforeman\n' >>"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  lines=$(printf '%s\n' "$widget" | grep -c .)
+  [ "$lines" -le 6 ] || fail "the widget grew past its budget ($lines lines)"
+  marker=$(printf '%s\n' "$widget" | grep -F "more")
+  assert_contains "$marker" "+4 more" "the rows that did not fit are counted"
+  assert_contains "$marker" "3 crews" "the dropped crews are counted"
+  assert_contains "$marker" "1 item" "the focused board's own dropped row is named, never silent"
+  assert_not_contains "$widget" "tidy the chrome" \
+    "a dropped row stays dropped: the marker replaces it, it does not smuggle it back"
+  pass "a crowded widget says what it left out"
 }
 
 test_calm_mode_hides_the_foremans_tool_calls() {
@@ -653,7 +742,7 @@ test_a_crew_and_its_item_render_as_one_row() {
   assert_not_contains "$widget" "[[accent]]active" "the linked item is not a second row"
   assert_not_contains "$widget" "active" "one item never wears two words for one moment"
   assert_contains "$widget" "social-preview" "the crew id the captain addresses stays visible"
-  assert_contains "$widget" "rendering the og" "the row says what the crew is actually doing"
+  assert_contains "$widget" "renderin" "the row says what the crew is actually doing"
   pass "a crew and its linked todo item render as one row"
 }
 
@@ -764,7 +853,7 @@ test_an_enormous_item_is_truncated_and_keeps_the_budget() {
   assert_contains "$widget" "…" "the long row is marked as truncated"
   assert_not_contains "$widget" "$huge" "the full item text is not printed"
   assert_contains "$widget" "#32" "a row after the long one still renders"
-  assert_contains "$widget" "short after the huge one" "the following item is intact"
+  assert_contains "$widget" "short after the hu" "the following item is intact"
 
   # Measure visible columns, not string length: strip the fake theme's role
   # tags and fold the multibyte ellipsis to one byte first, then take the
@@ -796,10 +885,10 @@ test_a_proposal_is_counted_apart_and_never_a_captain_row() {
 
   # The count is there, muted, and the captain's own total is unchanged by it.
   assert_contains "$status" "[[muted]]2 proposed" "the proposal count is muted and separate"
-  assert_contains "$status" "todo 0/1" "the captain's board counts only their items"
+  assert_contains "$status" "todo ▸foreman 0/1" "the captain's board counts only their items"
 
   # It trails the todo count: the board first, then the suggestions held apart.
-  todo=$(line_of "$bits" "todo 0/1")
+  todo=$(line_of "$bits" "todo ▸foreman 0/1")
   proposed=$(line_of "$bits" "2 proposed")
   [ -n "$todo" ] && [ -n "$proposed" ] || fail "the status line lost a count: $status"
   [ "$todo" -lt "$proposed" ] || fail "the proposal count must trail the todo count: $status"
@@ -838,6 +927,9 @@ test_the_vendored_calm_module_loads_under_pis_jiti
 test_the_crew_command_completes_its_arguments
 test_the_chrome_is_scoped_to_the_project_in_focus
 test_a_crew_outside_the_focus_keeps_its_item
+test_the_chrome_counts_active_work_in_other_scopes
+test_the_footer_bounds_its_project_rollup
+test_the_widget_never_truncates_silently
 test_a_linked_item_folds_into_its_crews_row_and_the_budget_holds
 test_a_crew_and_its_item_render_as_one_row
 test_the_status_column_honours_the_crews_own_busy_record

@@ -799,6 +799,7 @@ interface CrewRow {
  * state/age/description come from the crew.
  */
 interface ChromeRow {
+	project: string;
 	number: string;
 	title: string;
 	state: string;
@@ -834,10 +835,11 @@ const WIDGET_WIDTH = 80;
  * clipped, so the row can never wrap; the description takes what is left.
  */
 const COL_NUM = 5;
-const COL_TITLE = 25;
+const COL_PROJECT = 14;
+const COL_TITLE = 20;
 const COL_STATUS = 8;
 const COL_AGE = 4;
-const COL_DESC = WIDGET_WIDTH - (COL_NUM + 1 + 1 + 1 + COL_TITLE + 1 + COL_STATUS + 1 + COL_AGE + 1);
+const COL_DESC = WIDGET_WIDTH - (COL_NUM + 1 + COL_PROJECT + 1 + COL_TITLE + 1 + COL_STATUS + 1 + COL_AGE + 1);
 
 /** Theme roles, so the chrome reads correctly in a light and a dark terminal. */
 const STATE_COLOR: Record<string, "warning" | "error" | "accent" | "success" | "dim"> = {
@@ -1029,6 +1031,23 @@ function configFlag(key: string, fallback: boolean): boolean {
 	}
 }
 
+/**
+ * The project a crew belongs to, from its task record: the basename of the
+ * task's `project=` meta, or nothing when it has none. This mirrors
+ * `todo_project_of_crew` in bin/crew-todo.sh, so the chrome and the board file
+ * a crew under the same project. It is used only when no todo item links the
+ * crew; an item's scope is the captain's word and wins over the record.
+ */
+function crewProject(id: string): string {
+	try {
+		const meta = fs.readFileSync(path.join(TASKS, id, "meta"), "utf8");
+		const proj = (meta.match(/^project=(.*)$/m) ?? ["", ""])[1];
+		return proj ? path.basename(proj) : "";
+	} catch {
+		return "";
+	}
+}
+
 function updateChrome(ctx: ExtensionContext) {
 	if (!ctx.hasUI) return;
 	const rows = readBoard();
@@ -1046,10 +1065,12 @@ function updateChrome(ctx: ExtensionContext) {
 	// `crew_todo` tool reads. Held apart, never hidden.
 	const todo = allTodo.filter((t) => (t.scope || "foreman") === scope && t.status !== "proposed");
 	const proposed = allTodo.filter((t) => (t.scope || "foreman") === scope && t.status === "proposed");
-	const done = todo.filter((t) => t.status === "done").length;
-	const elsewhere = allTodo.filter((t) => t.status === "open" && (t.scope || "foreman") !== scope).length;
-
-	if (rows.length === 0 && todo.length === 0 && proposed.length === 0 && elsewhere === 0) {
+	// The chrome names every project with work in flight. The focus is only the
+	// lens that orders `/crew` and the widget; it is never rendered as if it were
+	// the whole board, and a project with a crew mid-flight is never counted zero.
+	// Nothing is rendered only when the fleet is empty and no scope has work.
+	const otherWork = allTodo.some((t) => t.status === "open" || t.status === "active");
+	if (rows.length === 0 && todo.length === 0 && proposed.length === 0 && !otherWork) {
 		ctx.ui.setStatus("foreman", undefined);
 		ctx.ui.setWidget("foreman", undefined);
 		return;
@@ -1068,18 +1089,101 @@ function updateChrome(ctx: ExtensionContext) {
 	const decisions = rows.filter((r) => r.state === "blocked" && r.note.startsWith("[")).length;
 	const otherBlocked = (counts.get("blocked") ?? 0) - decisions;
 	const bits: string[] = [];
-	if (decisions) bits.push(fg("warning", `${decisions} decision${decisions === 1 ? "" : "s"}`));
-	if (otherBlocked) bits.push(fg("warning", `${otherBlocked} blocked`));
+	const plainBits: string[] = [];
+	const addBit = (color: "warning" | "error" | "accent" | "success" | "dim" | "muted", text: string): void => {
+		bits.push(fg(color, text));
+		plainBits.push(text);
+	};
+	if (decisions) addBit("warning", `${decisions} decision${decisions === 1 ? "" : "s"}`);
+	if (otherBlocked) addBit("warning", `${otherBlocked} blocked`);
 	for (const state of STATE_ORDER) {
 		if (state === "blocked") continue;
 		const n = counts.get(state);
-		if (n) bits.push(fg(STATE_COLOR[state] ?? "muted", `${n} ${state}`));
+		if (n) addBit(STATE_COLOR[state] ?? "muted", `${n} ${state}`);
 	}
-	// The todo list is a different axis from the crew, so it trails the line.
-	if (todo.length || elsewhere) {
-		const label = scope === "foreman" ? `todo ${done}/${todo.length}` : `todo ${done}/${todo.length} ${scope}`;
-		const tail = elsewhere ? ` · +${elsewhere} open elsewhere` : "";
-		bits.push(fg("muted", `${label}${tail}`));
+
+	// The item a crew is on, looked up across every scope: a crew belongs to the
+	// fleet, not to the focused board, so its number and title survive the board
+	// reading another project, and it is what files the crew under a project. A
+	// crew with no linked item falls back to its task record.
+	const itemOfCrew = new Map<string, TodoRow>();
+	for (const item of allTodo) {
+		if (item.status === "done" || item.status === "proposed") continue;
+		if (item.crew && item.crew !== "-" && !itemOfCrew.has(item.crew)) itemOfCrew.set(item.crew, item);
+	}
+	const projectOfCrew = (crew: CrewRow): string => itemOfCrew.get(crew.id)?.scope || crewProject(crew.id) || "foreman";
+
+	// One tally per project, so the footer names every project with work in flight
+	// instead of rendering the focus as if it were the whole fleet. Items carry
+	// their project in their scope; a crew takes the project of the item it is on,
+	// else its task record. An entry is the project's `done/total`, and `total`
+	// counts `open` and `active` alike, so a project whose only work is a crew in
+	// flight (its item is `active`) is never zero.
+	interface ProjectTally {
+		scope: string;
+		crews: CrewRow[];
+		open: number;
+		active: number;
+		done: number;
+		rank: number;
+	}
+	const tallies = new Map<string, ProjectTally>();
+	const tally = (s: string): ProjectTally => {
+		let t = tallies.get(s);
+		if (!t) {
+			t = { scope: s, crews: [], open: 0, active: 0, done: 0, rank: STATE_ORDER.length };
+			tallies.set(s, t);
+		}
+		return t;
+	};
+	for (const item of allTodo) {
+		if (item.status === "proposed") continue;
+		const t = tally(item.scope || "foreman");
+		if (item.status === "open") t.open++;
+		else if (item.status === "active") t.active++;
+		else if (item.status === "done") t.done++;
+	}
+	for (const crew of rows) tally(projectOfCrew(crew)).crews.push(crew);
+	const itemTotal = (t: ProjectTally): number => t.open + t.active + t.done;
+	for (const t of tallies.values()) {
+		let rank = STATE_ORDER.length;
+		for (const c of t.crews) rank = Math.min(rank, rankOf(c));
+		if (t.active) rank = Math.min(rank, STATE_RANK.get("working") ?? rank);
+		if (t.open) rank = Math.min(rank, STATE_RANK.get("queued") ?? rank);
+		t.rank = rank;
+	}
+
+	// The footer rollup: the focus first and marked, then every other project with
+	// work in flight, worst first. `todo` names the axis, every entry names its
+	// project, and the projects that did not fit are counted, never silently
+	// dropped - scoping must never hide queued work. The rollup is bounded so the
+	// line cannot wrap.
+	const focusTally = tallies.get(scope);
+	const ordered: ProjectTally[] = [];
+	if (focusTally && (focusTally.crews.length || itemTotal(focusTally))) ordered.push(focusTally);
+	ordered.push(
+		...[...tallies.values()]
+			.filter((t) => t.scope !== scope && itemTotal(t) > 0)
+			.sort((a, b) => a.rank - b.rank || itemTotal(b) - itemTotal(a) || a.scope.localeCompare(b.scope)),
+	);
+	if (ordered.length) {
+		const STATUS_WIDTH = 100;
+		const entries = ordered.map((t, i) => `${i === 0 ? "todo " : ""}${t === focusTally ? "▸" : ""}${t.scope} ${t.done}/${itemTotal(t)}`);
+		const used0 = plainBits.reduce((n, text, i) => n + (i ? 3 : 0) + text.length, 0);
+		let used = used0;
+		const shownEntries: string[] = [];
+		for (let i = 0; i < entries.length; i++) {
+			const sep = used > 0 ? 3 : 0;
+			// Always show the focus (first) entry; the rest share what is left, with
+			// room reserved for the stated remainder so the line cannot wrap.
+			const reserve = i < entries.length - 1 ? 16 : 0;
+			if (i > 0 && used + sep + entries[i].length + reserve > STATUS_WIDTH) break;
+			used += sep + entries[i].length;
+			shownEntries.push(entries[i]);
+		}
+		for (const text of shownEntries) addBit("muted", text);
+		const omitted = entries.length - shownEntries.length;
+		if (omitted) addBit("muted", `+${omitted} project${omitted === 1 ? "" : "s"}`);
 	}
 	// Proposals are counted apart from the captain's board, in their own muted
 	// bit, and only when there are some, so a board with no suggestions reads
@@ -1091,46 +1195,33 @@ function updateChrome(ctx: ExtensionContext) {
 		ctx.ui.setWidget("foreman", undefined);
 		return;
 	}
-	// One row per crew. The status line counts crews by report state and the
-	// board counts items by intent; the widget is the one place they are shown
-	// together, so the merge happens here. A crew row takes its number and
-	// title from the item that links back to it (the crew id lives in the todo
-	// row's `crew` field), and that item is then spent: it never also renders
-	// as a todo row, so one piece of work can no longer wear `working` and
-	// `active` in the same moment. A todo item with no active crew keeps a row
-	// of its own, and a crew with no linked item keeps a row too - never
-	// silent, never both.
+	// One row per crew, then the board's own items. The status line counts crews
+	// by report state and the board counts items by intent; the widget is the one
+	// place they are shown together, and every row now carries its project, so a
+	// crew or an item from another project is never mistaken for the focused one.
+	// A crew row takes its number and title from the item that links back to it
+	// (across every scope), and that item is then spent: it never also renders as
+	// a todo row, so one piece of work can no longer wear `working` and `active`
+	// in the same moment. A todo item with no active crew keeps a row of its own,
+	// and a crew with no linked item keeps a row too - never silent, never both.
 	//
-	// Ordering is worst-first: crews by report state, then the leftover queue
-	// in file order. A linked item is part of its crew's row, so it can never
-	// be crowded out by an older queued one.
+	// Ordering is worst-first: every crew (busy fleet first), then the focus
+	// board's own rows, then every other project with work in flight, worst
+	// project first. A linked item is part of its crew's row, so it can never be
+	// crowded out by an older queued one.
 	//
-	// Proposals are absent from `todo` by construction (see the top of
-	// updateChrome), so no suggestion can ever take a line from the captain's
-	// board. The widget is the captain's alone; the `N proposed` count on the
-	// status line is the only chrome trace, and `/crew proposals` is how the
-	// captain reads the suggestions themselves.
+	// Proposals are absent from `todo` by construction, so no suggestion can ever
+	// take a line from the captain's board. The `N proposed` count on the status
+	// line is the only chrome trace; `/crew proposals` reads the suggestions.
 	const crewShown = rows
 		.filter((r) => ACTIVE_STATES.has(r.state))
 		.sort((a, b) => rankOf(a) - rankOf(b) || a.id.localeCompare(b.id));
-	const queued = todo.filter((t) => t.status !== "done");
-	// A crew row belongs to the fleet, not to one project's board, so its linked
-	// item is looked up across every scope. A crew working in another project
-	// must still show the number and title of the item it is on: `-` and
-	// `(no todo item)` mean "genuinely unlinked" and nothing else. Scoping this
-	// lookup to `queued` is what made a crew deploying in a project render as
-	// `- (no todo item)` whenever the board read another project, `foreman`
-	// included.
-	const itemOfCrew = new Map<string, TodoRow>();
-	for (const item of allTodo) {
-		if (item.status === "done") continue;
-		if (item.crew && item.crew !== "-" && !itemOfCrew.has(item.crew)) itemOfCrew.set(item.crew, item);
-	}
 	const spent = new Set<string>();
 	const chromeRows: ChromeRow[] = crewShown.map((crew) => {
 		const item = itemOfCrew.get(crew.id);
 		if (item) spent.add(item.seq);
 		return {
+			project: projectOfCrew(crew),
 			number: item ? `#${item.seq}` : "-",
 			title: item ? item.text : "(no todo item)",
 			state: displayState(crew),
@@ -1142,13 +1233,13 @@ function updateChrome(ctx: ExtensionContext) {
 		};
 	});
 	const activeIds = new Set(crewShown.map((c) => c.id));
-	for (const item of queued) {
-		if (spent.has(item.seq)) continue;
+	const itemRow = (item: TodoRow): ChromeRow => {
 		const crew = item.crew && item.crew !== "-" ? item.crew : "";
 		// A row states why no crew state is shown on it, rather than leaving
 		// the status column ambiguous.
 		const note = !crew ? "(no crew yet)" : activeIds.has(crew) ? "(crew already listed)" : "(no active crew)";
-		chromeRows.push({
+		return {
+			project: item.scope || "foreman",
 			number: `#${item.seq}`,
 			title: item.text,
 			// No crew in flight: the item's own intent is the only status there is.
@@ -1156,10 +1247,47 @@ function updateChrome(ctx: ExtensionContext) {
 			age: "-",
 			note,
 			crew,
-		});
+		};
+	};
+	// The focus board's own outstanding rows, in file order.
+	for (const item of todo) {
+		if (item.status === "done" || item.status === "proposed") continue;
+		if (!spent.has(item.seq)) chromeRows.push(itemRow(item));
+	}
+	// Then every other project with work in flight, worst project first, so a
+	// busier project's work is never crowded out by the focused backlog.
+	const otherByScope = new Map<string, TodoRow[]>();
+	for (const item of allTodo) {
+		if (item.status !== "open" && item.status !== "active") continue;
+		if ((item.scope || "foreman") === scope) continue;
+		if (spent.has(item.seq)) continue;
+		const s = item.scope || "foreman";
+		const list = otherByScope.get(s);
+		if (list) list.push(item);
+		else otherByScope.set(s, [item]);
+	}
+	const scopeOrder = [...otherByScope.keys()].sort(
+		(a, b) => (tallies.get(a)?.rank ?? STATE_ORDER.length) - (tallies.get(b)?.rank ?? STATE_ORDER.length) || a.localeCompare(b),
+	);
+	for (const s of scopeOrder) {
+		for (const item of (otherByScope.get(s) ?? []).sort((x, y) => Number(x.seq) - Number(y.seq))) chromeRows.push(itemRow(item));
 	}
 
-	const lines = chromeRows.slice(0, 6).map((row) => {
+	// The widget has a hard line budget, and the fleet is global while the board
+	// is one project's. With more rows than the budget the tail used to vanish
+	// with no trace; the last line is now spent on a marker that says how many
+	// rows were left out and how many of those were crews rather than board items.
+	// The distinction is the point: an omitted crew is the fleet being busy, an
+	// omitted item is the captain's own work disappearing from his widget.
+	const budget = 6;
+	const crewRows = crewShown.length;
+	let shown = chromeRows;
+	let dropped = 0;
+	if (chromeRows.length > budget) {
+		shown = chromeRows.slice(0, budget - 1);
+		dropped = chromeRows.length - shown.length;
+	}
+	const lines = shown.map((row) => {
 		const state = fg(STATE_COLOR[row.state] ?? "muted", clip(row.state, COL_STATUS).padEnd(COL_STATUS));
 		// The crew id stays visible, compact, as the description's prefix: it is
 		// how the captain addresses a crew, and a clipped description keeps the
@@ -1168,7 +1296,7 @@ function updateChrome(ctx: ExtensionContext) {
 		const tail = `${row.age.padEnd(COL_AGE)} ${desc}`.trimEnd();
 		return [
 			clip(row.number, COL_NUM).padEnd(COL_NUM),
-			"-",
+			clip(row.project, COL_PROJECT).padEnd(COL_PROJECT),
 			clip(row.title, COL_TITLE).padEnd(COL_TITLE),
 			state,
 			fg("muted", tail),
@@ -1176,6 +1304,14 @@ function updateChrome(ctx: ExtensionContext) {
 			.join(" ")
 			.trimEnd();
 	});
+	if (dropped) {
+		const droppedCrews = Math.max(0, crewRows - shown.length);
+		const droppedItems = dropped - droppedCrews;
+		const what: string[] = [];
+		if (droppedCrews) what.push(`${droppedCrews} crew${droppedCrews === 1 ? "" : "s"}`);
+		if (droppedItems) what.push(`${droppedItems} item${droppedItems === 1 ? "" : "s"}`);
+		lines.push(fg("muted", clip(`… +${dropped} more: ${what.join(", ")}`, WIDGET_WIDTH)));
+	}
 	ctx.ui.setWidget("foreman", lines.length ? lines : undefined);
 }
 

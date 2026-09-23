@@ -246,28 +246,41 @@ queue; the widget is worst-first, gives each state its theme role, and keeps one
 crew on one row:
 
 ```
-1 decision · 1 failed · 1 review · 2 working · todo 3/12 notes-app
+1 decision · 1 failed · 1 review · 2 working · todo ▸notes-app 3/12 · api 0/2
 
-#42   - Fix the retry policy      blocked  4m   c-authque [api] retry policy: f…
-#12   - Review the merge UI       review   1m   c-docs PR #12 waiting to merge
-#57   - Land the parser rewrite   working  7m   c-parser splitting the grammar
--     - (no todo item)            failed   30m  c-ingest no such host: registry…
-#11   - Finish the widget         open     -    (no crew yet)
+#42   notes-app       Fix the retry policy      blocked  4m   c-authque [api] retry policy: f…
+#12   notes-app       Review the merge UI       review   1m   c-docs PR #12 waiting to merge
+#57   api             Land the parser rewrite   working  7m   c-parser splitting the grammar
+-     api             (no todo item)            failed   30m  c-ingest no such host: registry…
+#11   notes-app       Finish the widget         open     -    (no crew yet)
 ```
 
-A row is: the todo number (or `-`), `-`, the todo title, a **single** status
-column, how long ago the crew last reported (`-` when no crew has), and a short
-description of what the crew is actually doing — its last note, or `(no note
-yet)`. The status column has one source: a crew in flight shows its own state
-(`working`, `idle`, `review`, `blocked`, …), while an item no crew has claimed
-shows its todo state (`open`). One piece of work therefore never lands in two
-rows, and the same moment never wears two words. The crew id stays visible as
-the description's prefix, because it is what you address a crew with; a long id
-shares the description's width with the note. A crew with no linked item and an
-item with no crew each keep a stated row. Every column has a fixed share and is
-clipped, so a row never wraps.
+The status line's last bit is a per-project rollup, one project at a time: the
+focused project first and marked `▸`, then every other project with work in
+flight, worst-first (`blocked`/decision > `working` > `open`). Each entry is
+that project's `done/total`, counting `open` and `active` alike, so a project
+with a crew mid-flight is never invisible. The rollup is bounded so the line
+cannot wrap, and any projects that did not fit are counted (`+2 projects`) —
+never silently dropped.
 
-The widget shows at most six lines. `/crew` prints the whole board, and the
+A row is: the todo number (or `-`), **its project**, the todo title, a
+**single** status column, how long ago the crew last reported (`-` when no crew
+has), and a short description of what the crew is actually doing — its last
+note, or `(no note yet)`. The status column has one source: a crew in flight
+shows its own state (`working`, `idle`, `review`, `blocked`, …), while an item
+no crew has claimed shows its todo state (`open`). One piece of work therefore
+never lands in two rows, and the same moment never wears two words. The crew id
+stays visible as the description's prefix, because it is what you address a
+crew with; a long id shares the description's width with the note. A crew with
+no linked item and an item with no crew each keep a stated row. Every column has
+a fixed share and is clipped, so a row never wraps.
+
+The widget shows at most six lines: every crew first (worst-first), then the
+focused board's own queued rows, then queued items from every other project with
+work in flight. Every row names its project, so a crew or an item from another
+project is never mistaken for the focused one. When there are more rows than
+fit, the last line says how many were left out and which part was crews rather
+than the captain's own board. `/crew` prints the whole board, and the
 palette completes its arguments (`on`, `off`, `calm`, `calm on`, `calm off`,
 `proposals`, `proposals all`); `/crew on|off` toggles the widget, and
 `/crew proposals` reads the suggestions held apart from the board (below).
@@ -313,12 +326,12 @@ own backlog lives under `foreman` instead of crowding it out.
 2    active/review css-audit   audit unused CSS
 3    open         -            rate limit /api/upload
 
-  open elsewhere: foreman 1 open (crew-todo.sh list --all)
+  elsewhere: foreman 1 open, 2 active (crew-todo.sh list --all)
 ```
 
-Queued work in another scope is counted rather than hidden, `show: all` groups
-every scope under its own heading, and adding an item without a project files it
-in the scope in focus. Placing a crew for a project puts that project in focus,
+Work in another scope - queued or in flight - is counted rather than hidden,
+named by the status it is in, and `show: all` groups every scope under its own
+heading. Adding an item without a project files it in the scope in focus. Placing a crew for a project puts that project in focus,
 so the board follows the work without you saying so twice.
 
 The board is yours. Ask for something and it goes straight on. The foreman never
@@ -337,7 +350,7 @@ A proposal is a suggestion, not your work, so it never appears among your items
 proposals` (or `/crew proposals all` for every scope); that shells out to the
 same table the foreman's `crew_todo proposals` shows, so the two cannot
 disagree. The status line counts them separately and only when there are some
-(`… · todo 3/12 · 2 proposed`), and that count stays visible even with the
+(`… · todo ▸notes-app 3/12 · 2 proposed`), and that count stays visible even with the
 widget turned off, so a proposal is never invisible. Approving one promotes it
 to the board and keeps the number you already saw; declining it drops it. Both
 are yours to call: `approve 4` keeps it, `drop 4` lets it go.
