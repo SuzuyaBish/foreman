@@ -198,9 +198,28 @@ sweep_finished_homes() {
   done
 }
 
+# A linked item's status is derived from its crew's state, so it has to settle
+# wherever that state changes -- not only at a merge. A crew that reports `done`
+# (a report task, no pull request) or goes `failed`/`lost` (which reopens the
+# item) leaves the same stale `active` row otherwise, and the chrome cannot
+# reconcile it: it reads todo.tsv directly and must not fork. The watcher is
+# already the observer of exactly these transitions, so this is where the
+# general (non-merge) ones settle. `crew-merge.sh` runs the same one-line rule
+# on its own success path as well, because a merge is a synchronous command
+# whose settlement must be immediate rather than up to an interval, and its
+# transition can happen while the watcher is between runs. Two triggers, one
+# idempotent rule (`crew-todo.sh sync`); never a second settling rule.
+settle_todos() {
+  "$FOREMAN_ROOT/bin/crew-todo.sh" sync >/dev/null 2>&1 || true
+}
+
 sweep_endpoints
 poll_prs
 service_steers
+# Anything that changed while no watcher was running is still a derived row
+# waiting to settle; reconcile once at the start, then again below whenever
+# the loop observes a change.
+settle_todos
 prev=$(snapshot)
 
 while :; do
@@ -209,6 +228,9 @@ while :; do
   service_steers
   sweep_endpoints
   cur=$(snapshot)
+  # The sweep may have folded a lost endpoint into `failed`; the change is
+  # already written, so settle the derived rows now.
+  [ "$cur" = "$prev" ] || settle_todos
   stalled=$(check_stalls)
   finished=$(sweep_finished_homes)
 
