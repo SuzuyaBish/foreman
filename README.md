@@ -548,7 +548,7 @@ toggles the widget.
 | `bin/crew-inbox.sh <id>` | *crew side:* read and acknowledge steers |
 | `bin/crew-read.sh <id>` | the crew's report, capped |
 | `bin/crew-stop.sh <id> [--exit\|--close]` | interrupt / exit / close |
-| `bin/crew-archive.sh <id> [--worktree]` | retire a finished task |
+| `bin/crew-archive.sh <id> [--worktree] [--force] [--keep-home]` | retire a finished task, closing its terminal |
 | `bin/crew-watch.sh` | one-shot watcher behind the auto wake |
 | `bin/crew-test.sh` | the behaviour suite in `tests/` |
 

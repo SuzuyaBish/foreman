@@ -343,6 +343,16 @@ When the probe itself is broken (no `lsof`, no anchor to attribute to) it exits
 one that did nothing, and a probe that cannot see must not hold a crew's work
 hostage.
 
+Archiving is the other half of teardown. A retired task must not leave its
+terminal behind: a pane whose crew has finished or merged is indistinguishable
+from one that is still working, so `crew-archive` closes the home the foreman
+created for the crew — its workspace, else its tab — before the record moves. It
+has to be before, because `foreman_close_home` reads the workspace and tab from
+the task's own `meta`. The close is best effort: Herdr down, the socket gone, or
+the endpoint already dead is reported in the archive line and the record is moved
+regardless, so the record always survives. `--keep-home` opts out, for a task
+whose terminal the captain still wants.
+
 ## Scopes
 
 One harness serves many projects, and the todo list is where that would
