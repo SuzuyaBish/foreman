@@ -282,16 +282,13 @@ const crewSpawn = defineTool({
 		if (params.delivery) args.push("--delivery", params.delivery);
 		if (params.model) args.push("--model", params.model);
 		if (params.thinking) args.push("--thinking", params.thinking);
+		// The item number must reach the launcher before the workspace is created,
+		// because the workspace label is written once at launch and never rewritten.
+		// crew-spawn.sh owns the link when `--todo` is given, so there is exactly one
+		// place that records it and no board write can race the launch.
+		if (params.todo !== undefined) args.push("--todo", String(params.todo));
 		args.push("--", params.task);
-		let text = await run("crew-spawn.sh", args);
-		if (params.todo !== undefined) {
-			try {
-				const linked = await run("crew-todo.sh", ["start", String(params.todo), params.id], 300);
-				text += `\n${linked}`;
-			} catch (error) {
-				text += `\nwarning: could not link todo #${params.todo}: ${String(error)}`;
-			}
-		}
+		const text = await run("crew-spawn.sh", args);
 		return { content: [{ type: "text", text }], details: undefined };
 	},
 });

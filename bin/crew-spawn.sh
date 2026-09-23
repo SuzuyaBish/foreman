@@ -394,6 +394,16 @@ LAUNCH_ARGS=()
 [ -z "$TODO_LINK" ] || LAUNCH_ARGS+=(--todo "$TODO_LINK")
 "$FOREMAN_ROOT/bin/crew-launch.sh" "$ID" "$CWD" ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
 
+# The spawn that named the item is the one that links it. Doing it here, after a
+# successful launch, keeps the link to a single writer: the tool passes --todo
+# and nothing else records it, so the board cannot be written twice or race the
+# label the launcher just built. A link that fails is a warning, not a failed
+# crew: the launch already happened, and the caller can still fix the board.
+if [ -n "$TODO_LINK" ]; then
+  "$FOREMAN_ROOT/bin/crew-todo.sh" start "$TODO_LINK" "$ID" ||
+    printf 'warning: could not link todo #%s to %s\n' "$TODO_LINK" "$ID" >&2
+fi
+
 printf 'cwd %s\n' "$CWD"
 [ -z "$WT" ] || printf 'worktree %s on branch crew/%s\n' "$WT" "$ID"
 [ -z "$MODEL" ] || printf 'model %s\n' "$MODEL"
