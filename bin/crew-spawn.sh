@@ -356,6 +356,10 @@ foreman_meta_set "$ID" busy_gen "$GEN"
 LAUNCH_ARGS=()
 [ -z "$MODEL" ] || LAUNCH_ARGS+=(--model "$MODEL")
 [ -z "$THINKING" ] || LAUNCH_ARGS+=(--thinking "$THINKING")
+# A spawn that names the item is the one caller that knows the number before the
+# board is linked, so it is passed to the launcher; the launcher also reads the
+# board, which is how a recovery relaunch - it passes no flag - gets the number.
+[ -z "$TODO_LINK" ] || LAUNCH_ARGS+=(--todo "$TODO_LINK")
 "$FOREMAN_ROOT/bin/crew-launch.sh" "$ID" "$CWD" ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
 
 printf 'cwd %s\n' "$CWD"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # crew-launch.sh - put a crew member in a pane. The one launch owner.
 #
-# Usage: crew-launch.sh <id> <cwd> [--model M] [--thinking T] [--note <text>]
+# Usage: crew-launch.sh <id> <cwd> [--model M] [--thinking T] [--note <text>] [--todo <n>]
 #
 # Assumes the task directory and brief.md already exist. Creates the tab, records
 # the endpoint, launches pi with this task's extension, and marks the task
@@ -18,14 +18,16 @@ if [ $# -ge 2 ]; then shift 2; else set --; fi
 MODEL=
 THINKING=
 NOTE=
+TODO_ARG=
 while [ $# -gt 0 ]; do
   case "$1" in
-  --model | --thinking | --note)
+  --model | --thinking | --note | --todo)
     [ $# -ge 2 ] || foreman_die "$1 requires a value"
     case "$1" in
     --model) MODEL=$2 ;;
     --thinking) THINKING=$2 ;;
     --note) NOTE=$2 ;;
+    --todo) TODO_ARG=$2 ;;
     esac
     shift 2
     ;;
@@ -54,6 +56,23 @@ APPROVE=$(foreman_config_bool crewApprove 1)
 #
 # A relaunch adopts the workspace the task already owns instead of creating a
 # second one, so recovery does not multiply workspaces.
+#
+# The label leads with the linked todo item's number so the sidebar says which
+# item a crew is on, not just which id: `└ #44 calm-baseline`. The `└ ` child
+# marker and the id both stay. `--todo` is the spawn's own knowledge and wins;
+# without it the board is read by crew id, so a recovery relaunch still gets the
+# number. An unlinked crew keeps today's `└ <id>`. The label is written when the
+# workspace is created and never rewritten, so an item linked afterwards shows
+# on a later launch in a fresh workspace, not on this one.
+TODO_SEQ=$TODO_ARG
+if [ -n "$TODO_SEQ" ]; then
+  case "$TODO_SEQ" in *[!0-9]*) foreman_die "--todo needs a number, not '$TODO_SEQ'" ;; esac
+else
+  TODO_SEQ=$(foreman_todo_item_of_crew "$ID")
+  TODO_SEQ=${TODO_SEQ%%$'\t'*}
+fi
+LABEL="└ $ID"
+[ -z "$TODO_SEQ" ] || LABEL="└ #$TODO_SEQ $ID"
 PARENT_WS=$(foreman_workspace)
 WS=$(foreman_own_workspace "$ID")
 NEW_WS=0
@@ -65,7 +84,7 @@ if [ -n "$WS" ] && foreman_herdr workspace get "$WS" >/dev/null 2>&1; then
   TAB=$(printf '%s' "$OUT" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
   PANE=$(printf '%s' "$OUT" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
 else
-  OUT=$(foreman_herdr workspace create --cwd "$CWD" --label "└ $ID" --no-focus 2>/dev/null) || OUT=
+  OUT=$(foreman_herdr workspace create --cwd "$CWD" --label "$LABEL" --no-focus 2>/dev/null) || OUT=
   WS=$(printf '%s' "$OUT" | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
   TAB=$(printf '%s' "$OUT" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
   PANE=$(printf '%s' "$OUT" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)

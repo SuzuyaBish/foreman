@@ -128,6 +128,24 @@ test_project_without_isolation() {
   pass "--no-isolate is honoured"
 }
 
+test_a_spawn_that_names_the_item_labels_the_workspace() {
+  local proj seq
+  proj="$FOREMAN_PROJECTS/tagged"
+  fm_git_repo "$proj" --origin >/dev/null
+  fm_gh_stub >/dev/null
+  "$BIN/crew-todo.sh" add --project tagged "label the crew" >/dev/null
+  seq=$(cut -f1 "$FOREMAN_HOME/todo.tsv" | tail -1)
+
+  "$SPAWN" tagged-iso --project tagged --todo "$seq" "isolated and numbered" >/dev/null
+  assert_contains "$(fm_herdr_calls)" "--label └ #$seq tagged-iso" \
+    "the workspace label leads with the item number"
+  # The worktree directory name is deliberately NOT renamed: Herdr renders the
+  # workspace label, and the worktree path is the teardown anchor. Renaming it
+  # would be an invisible, load-bearing change.
+  assert_present "$FOREMAN_WORKTREES/tagged-iso/.git" "the worktree keeps its plain id name"
+  pass "a spawn that names the item puts the number in the workspace label"
+}
+
 test_arguments_are_validated() {
   local dir
   dir=$(fm_tmproot args)
@@ -278,6 +296,7 @@ test_workspace_resolution() {
 test_plain_directory_spawn
 test_delivery_mode_detection
 test_isolation_uses_a_worktree
+test_a_spawn_that_names_the_item_labels_the_workspace
 test_project_without_isolation
 test_arguments_are_validated
 test_double_dash_and_model_options
