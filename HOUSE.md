@@ -20,6 +20,11 @@ Each chart is a handful of one-line fields (`kind`, `where`, `bind`, `status`,
 `next`) and an append-only dated log. `bin/house-rounds.sh` reads them all and
 tells you where everything stands and what is rotting.
 
+`updated` is **last-write, not last-verified**: it moves when the chart is
+written to (`note` or `next`), never when a claim is re-checked. A status — a
+commit sha, a branch, a PR — can read fresh while being wrong, and rounds age
+the chart you last touched, not the state you last confirmed.
+
 ## Entering house mode
 
 ```sh

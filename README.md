@@ -486,6 +486,12 @@ Two lines on each area are the ones that matter:
 Everything else in the file is a dated log of what changed. Keeping those two
 lines honest is the whole job of the chart.
 
+`updated` is **last-write, not last-verified**: it moves when the chart is
+written to (`note`, `next`), never when something is re-checked. A status claim
+— a commit sha, a branch, a PR — can therefore read fresh while being wrong,
+and a round ages the chart you last touched, not the state you last confirmed.
+Re-reading the claim is part of acting on it.
+
 ### The loop, step by step
 
 House only ever does four things, and never any of them on its own:
@@ -557,7 +563,7 @@ and house picks the tool.
 
 | Command | Verbs | Does |
 |---|---|---|
-| `bin/house-area.sh` | `add` `list` `show` `archive` | the chart: open an area, see them all, read one, retire one |
+| `bin/house-area.sh` | `add` `list` `show` `archive` `unarchive` | the chart: open an area, see them all, read one, retire one, or bring one back |
 | `bin/house-note.sh` | `--status` `--next` | append a dated note and bump `updated` |
 | `bin/house-next.sh` | `--clear` | set or clear the diagnosed next step |
 | `bin/house-rounds.sh` | `--all` `--stale-days` `--digest` | one line per area; mark stale or no-next |
@@ -604,7 +610,7 @@ None of them spawn, merge, archive, edit or run anything:
 
 | Tool | What it does |
 |---|---|
-| `house_areas` | the chart: `list`, `add` an area, or `archive` one |
+| `house_areas` | the chart: `list`, `add` an area, `archive` one, or `unarchive` one |
 | `house_visit <slug>` | read one area's whole chart |
 | `house_note <slug>` | chart a change; may set status and next |
 | `house_next <slug>` | set (or clear) the diagnosed next step |

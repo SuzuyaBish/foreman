@@ -16,6 +16,48 @@ PRESCRIBE="$BIN/house-prescribe.sh"
 OUTBOX="$FOREMAN_HOME/house/outbox"
 ERRF="$FOREMAN_HOME/prescribe.err"
 
+test_copy_reports_a_failing_clipboard() {
+  fm_fakebin
+  cat >"$FM_FAKEBIN/pbcopy" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+exit 1
+SH
+  chmod +x "$FM_FAKEBIN/pbcopy"
+  local rc
+  "$PRESCRIBE" atlas --stdout --copy >/dev/null 2>"$ERRF"
+  rc=$?
+  expect_code 0 "$rc" "a failing clipboard tool is not an error"
+  assert_contains "$(cat "$ERRF")" "failed" "a tool that exists but failed is distinguished"
+  assert_not_contains "$(cat "$ERRF")" "no clipboard tool" "a failure is not reported as a missing tool"
+  pass "--copy tells a missing clipboard from a failing one"
+}
+
+test_latest_outbox_reads_the_numeric_suffix() {
+  rm -rf "$OUTBOX"
+  mkdir -p "$OUTBOX"
+  : >"$OUTBOX/atlas-20260101T000000Z.md"
+  : >"$OUTBOX/atlas-20260101T000000Z-2.md"
+  local got
+  got=$(. "$BIN/house-lib.sh" && house_latest_outbox atlas)
+  assert_equals "$OUTBOX/atlas-20260101T000000Z-2.md" "$got" "the numbered suffix is the newest, not '.<ts>'"
+  : >"$OUTBOX/atlas-20260102T000000Z.md"
+  got=$(. "$BIN/house-lib.sh" && house_latest_outbox atlas)
+  assert_equals "$OUTBOX/atlas-20260102T000000Z.md" "$got" "a later timestamp beats an earlier suffixed file"
+  pass "latest outbox is newest by timestamp, then by numeric suffix"
+}
+
+test_reports_an_archived_area() {
+  "$AREA" archive atlas >/dev/null
+  local rc
+  "$PRESCRIBE" atlas >/dev/null 2>"$ERRF"
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "prescribing an archived area was accepted"
+  assert_contains "$(cat "$ERRF")" "archived" "the refusal says the area is archived"
+  assert_contains "$(cat "$ERRF")" "unarchive" "the refusal points at unarchive"
+  pass "prescribe names an archived area instead of 'no such area'"
+}
+
 test_refuses_without_a_next() {
   "$AREA" add blank --kind repo >/dev/null
   local rc
@@ -25,6 +67,17 @@ test_refuses_without_a_next() {
   assert_contains "$(cat "$ERRF")" "no diagnosed next step" "the refusal says why"
   assert_contains "$(cat "$ERRF")" "house-next.sh" "the refusal points at the fix"
   pass "a prescription needs a diagnosed next step"
+}
+
+test_refuses_a_whitespace_only_next() {
+  "$AREA" add blankish --kind repo >/dev/null
+  "$NEXT" blankish '   ' >/dev/null
+  local rc
+  "$PRESCRIBE" blankish >/dev/null 2>"$ERRF"
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a whitespace-only next was prescribed"
+  assert_contains "$(cat "$ERRF")" "no diagnosed next step" "whitespace is refused like no next"
+  pass "a whitespace-only next cannot diagnose an empty step"
 }
 
 test_stdout_is_paste_ready() {
@@ -41,6 +94,7 @@ test_stdout_is_paste_ready() {
   assert_contains "$out" "Diagnosed next step:" "the prompt labels the step"
   assert_contains "$out" "add --dry-run and a test for it" "the step is the chart's"
   assert_contains "$out" "Standing conventions:" "the conventions are included"
+  assert_contains "$out" "last write, not the last verification" "the prompt tells the session to re-check the status claim"
   assert_contains "$out" "pull request" "a repo area is delivered as a PR"
   assert_contains "$err" "wrote" "the outbox path is reported on stderr"
   assert_present "$OUTBOX/atlas-"*.md "the prompt landed in the outbox"
@@ -118,10 +172,14 @@ test_outbox_collisions_do_not_overwrite() {
 }
 
 test_refuses_without_a_next
+test_refuses_a_whitespace_only_next
 test_stdout_is_paste_ready
 test_stdout_skips_the_outbox
 test_delivery_follows_the_kind
 test_context_is_appended
 test_copy_uses_a_clipboard_when_present
 test_copy_degrades_without_a_clipboard
+test_copy_reports_a_failing_clipboard
 test_outbox_collisions_do_not_overwrite
+test_latest_outbox_reads_the_numeric_suffix
+test_reports_an_archived_area

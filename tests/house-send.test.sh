@@ -25,8 +25,29 @@ test_refuses_without_a_bind() {
   "$SEND" nobind >/dev/null 2>"$ERRF"
   rc=$?
   [ "$rc" -ne 0 ] || fail "sending an area with no bind was accepted"
-  assert_contains "$(cat "$ERRF")" "--copy" "the refusal points at the clipboard path"
-  pass "an area with no bind is refused, pointing at --copy"
+  assert_contains "$(cat "$ERRF")" "prescription is ready" "the refusal points at the ready prescription"
+  assert_contains "$(cat "$ERRF")" "nobind-" "the refusal names the outbox file"
+
+  "$AREA" add nobind2 --kind repo >/dev/null
+  "$NEXT" nobind2 "do the thing" >/dev/null
+  "$SEND" nobind2 >/dev/null 2>"$ERRF"
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "sending with no bind and no prescription was accepted"
+  assert_contains "$(cat "$ERRF")" "--copy" "with no prescription it points at --copy"
+  pass "an area with no bind points at its prescription, or at --copy when there is none"
+}
+
+test_reports_a_doorbell_that_was_not_rung() {
+  fm_task t2 working >/dev/null
+  "$AREA" add unringable --kind repo --bind t2 >/dev/null
+  "$NEXT" unringable "do the thing" >/dev/null
+  "$PRESCRIBE" unringable >/dev/null 2>&1
+  local out
+  out=$("$SEND" unringable --yes 2>/dev/null)
+  assert_contains "$out" "doorbell not rung" "an unringable pane is reported, not called sent"
+  assert_not_contains "$out" "house: sent" "it is not claimed as sent"
+  assert_present "$FOREMAN_HOME/tasks/t2/inbox/001.msg" "the durable record still landed"
+  pass "house-send does not say sent when the doorbell was not rung"
 }
 
 test_refuses_a_bind_that_is_not_a_task() {
@@ -92,6 +113,7 @@ test_warns_when_the_chart_moved_on() {
 }
 
 test_refuses_without_a_bind
+test_reports_a_doorbell_that_was_not_rung
 test_refuses_a_bind_that_is_not_a_task
 test_refuses_without_a_prescription
 test_dry_run_then_send

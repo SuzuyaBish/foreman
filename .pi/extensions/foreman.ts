@@ -546,11 +546,12 @@ const houseAreas = defineTool({
 		"The chart of ongoing areas. `list` (default) shows every active area as one " +
 		"line; `add` starts a chart for a new area (slug, title, kind, where, bind, " +
 		"status, next); `archive` retires an area out of the active list without " +
-		"deleting it. An area is any thread the captain keeps: a repo, a project in " +
+		"deleting it, and `unarchive` brings one back. An area is any thread the " +
+		"captain keeps: a repo, a project in " +
 		"its own chat, a deck or talk, a craft. It is not a git project and not a crew " +
 		"task.",
 	parameters: Type.Object({
-		action: Type.Optional(Type.String({ description: "list (default) | add | archive" })),
+		action: Type.Optional(Type.String({ description: "list (default) | add | archive | unarchive" })),
 		slug: Type.Optional(Type.String({ description: "Short kebab-case area name" })),
 		title: Type.Optional(Type.String({ description: "For add: human title" })),
 		kind: Type.Optional(Type.String({ description: "For add: repo | chat | deck | craft | other" })),
@@ -575,6 +576,10 @@ const houseAreas = defineTool({
 		if (action === "archive") {
 			if (!params.slug) throw new Error("archive needs slug");
 			return { content: [{ type: "text", text: await runHouse("house-area.sh", ["archive", params.slug], 800) }], details: undefined };
+		}
+		if (action === "unarchive") {
+			if (!params.slug) throw new Error("unarchive needs slug");
+			return { content: [{ type: "text", text: await runHouse("house-area.sh", ["unarchive", params.slug], 800) }], details: undefined };
 		}
 		const text = await runHouse("house-area.sh", ["list"]);
 		return { content: [{ type: "text", text }], details: undefined };
@@ -1271,7 +1276,14 @@ export default function foreman(pi: ExtensionAPI) {
 	// tools it does need. The flag prevents that at launch; this guard covers
 	// everything a crew starts afterwards, which inherits the marker.
 	if (process.env.FOREMAN_CREW) return;
-	for (const tool of [
+
+	// House is the physician, not a second foreman: it examines, diagnoses,
+	// prescribes and (on say-so) sends, and it must never spawn, merge, archive or
+	// steer. In a house session the discipline is enforced by the tool list, not
+	// just the skill, so the crew_* tools are simply not registered. A normal
+	// foreman session keeps both sets, because the captain drives House from the
+	// foreman on request.
+	const crewTools = [
 		crewTodo,
 		crewSpawn,
 		crewList,
@@ -1291,6 +1303,8 @@ export default function foreman(pi: ExtensionAPI) {
 		crewWakeDrain,
 		crewDoctor,
 		crewHandoff,
+	];
+	const houseTools = [
 		houseAreas,
 		houseVisit,
 		houseNote,
@@ -1298,9 +1312,13 @@ export default function foreman(pi: ExtensionAPI) {
 		houseRounds,
 		housePrescribe,
 		houseSend,
-		lavishOpen,
-		lavishPoll,
-	]) {
+	];
+	const sharedTools = [lavishOpen, lavishPoll];
+	const tools =
+		process.env.FOREMAN_MODE === "house"
+			? [...houseTools, ...sharedTools]
+			: [...crewTools, ...houseTools, ...sharedTools];
+	for (const tool of tools) {
 		pi.registerTool(calmTool(tool));
 	}
 
@@ -1470,7 +1488,9 @@ export default function foreman(pi: ExtensionAPI) {
 		// chart.
 		if (process.env.FOREMAN_MODE === "house") {
 			try {
-				const rounds = (await runHouse("house-rounds.sh", [], 4000)).trim();
+				// A clipped row is short, but a chart with many areas still adds up;
+				// 20k covers a few hundred rows without swallowing the whole turn.
+				const rounds = (await runHouse("house-rounds.sh", [], 20000)).trim();
 				if (rounds) {
 					pi.sendMessage(
 						{ customType: "house-rounds", content: rounds, display: false },

@@ -75,6 +75,10 @@ load() { # <home> [crew-id] -> what the extension registered
   fi
 }
 
+load_mode() { # <mode> <home> -> what the extension registered in that mode
+  FOREMAN_MODE="$1" node "$HARNESS" "$ROOTDIR/.pi/extensions/foreman.ts" "$2"
+}
+
 test_a_crew_session_gets_none_of_it() {
   local out
   fm_home >/dev/null
@@ -102,5 +106,35 @@ test_the_captain_still_gets_all_of_it() {
   pass "the guard is exact: it is the marker, not the extension, that decides"
 }
 
+test_house_mode_gets_house_tools_and_no_crew_tools() {
+  local out
+  fm_home >/dev/null
+  out=$(load_mode house "$FOREMAN_HOME")
+
+  assert_contains "$out" "house_rounds" "a house session gets the chart tools"
+  assert_contains "$out" "house_prescribe" "a house session gets prescribe"
+  assert_contains "$out" "house_send" "a house session gets send"
+  assert_not_contains "$out" "crew_spawn" "a house session cannot spawn crew"
+  assert_not_contains "$out" "crew_merge" "a house session cannot merge"
+  assert_not_contains "$out" "crew_archive" "a house session cannot archive"
+  assert_not_contains "$out" "crew_send" "a house session cannot steer a crew"
+  assert_not_contains "$out" 'TOOLS:[]' "a house session is not inert"
+  pass "house mode registers the physician's tools and no crew tools"
+}
+
+test_foreman_mode_keeps_both() {
+  local out
+  fm_home >/dev/null
+  out=$(load_mode foreman "$FOREMAN_HOME")
+
+  assert_contains "$out" "crew_spawn" "a foreman session keeps the crew tools"
+  assert_contains "$out" "crew_merge" "a foreman session can still merge"
+  assert_contains "$out" "house_rounds" "a foreman session also gets House's tools"
+  assert_contains "$out" "house_prescribe" "a foreman session can prescribe"
+  pass "foreman mode keeps both tool sets"
+}
+
 test_a_crew_session_gets_none_of_it
 test_the_captain_still_gets_all_of_it
+test_house_mode_gets_house_tools_and_no_crew_tools
+test_foreman_mode_keeps_both

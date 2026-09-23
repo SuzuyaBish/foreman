@@ -9,6 +9,7 @@ set -u
 fm_home >/dev/null
 
 AREA="$BIN/house-area.sh"
+NOTE="$BIN/house-note.sh"
 NEXT="$BIN/house-next.sh"
 ROUNDS="$BIN/house-rounds.sh"
 
@@ -46,6 +47,8 @@ test_marks_no_next_and_stale() {
   assert_contains "$out" "house rounds: 3 areas (1 stale, 0 no next)" "the header counts stale and no-next"
   assert_contains "$out" "atlas" "the stale area is listed"
   assert_contains "$out" "[stale" "a stale updated is marked"
+  assert_contains "$out" "30d" "the row shows a relative age"
+  assert_not_contains "$out" "$(old_date 30)" "the raw ISO date is not pasted into the row"
   assert_contains "$out" "add --dry-run and a test" "the status/next line carries the step"
   assert_not_contains "$out" "[no next]" "an area with a next is not marked"
   pass "rounds mark a stale area and carry each next step"
@@ -59,6 +62,15 @@ test_no_next_is_marked() {
   assert_contains "$out" "[no next]" "a missing next is marked"
   assert_contains "$out" "status: -" "an absent status reads as a dash"
   pass "an area with no next is marked, not hidden"
+}
+
+test_whitespace_next_is_not_a_next() {
+  "$NEXT" expo-talk '   ' >/dev/null
+  local out
+  out=$("$ROUNDS")
+  assert_contains "$out" "1 no next" "a whitespace-only next still counts as none"
+  assert_contains "$out" "[no next]" "a whitespace-only next is marked"
+  pass "whitespace cannot defeat the no-next guard"
 }
 
 test_stale_bound_is_configurable() {
@@ -94,9 +106,58 @@ test_all_includes_archived() {
   pass "--all is the only way an archived area shows up"
 }
 
+test_house_today_is_utc() {
+  local today
+  today=$(. "$ROOT/bin/house-lib.sh" && house_today)
+  assert_equals "$(date -u +%Y-%m-%d)" "$today" "house_today is a UTC civil date"
+  pass "the chart's clock is UTC, not the reader's"
+}
+
+test_future_updated_is_stale() {
+  "$AREA" add future --kind repo >/dev/null
+  "$NEXT" future "do the thing" >/dev/null
+  backdate future "2999-01-01"
+  local out
+  out=$("$ROUNDS")
+  assert_contains "$out" "[future]" "a future updated is marked, not treated as fresh"
+  rm -f "$FOREMAN_HOME/house/areas/future.md"
+  pass "a future updated date is stale, not immortal"
+}
+
+test_rows_clip_long_fields() {
+  local long
+  long=$(printf 'x%.0s' $(seq 1 80))
+  "$AREA" add verbose --kind repo >/dev/null
+  "$NOTE" verbose --status "$long" --next "$long" "a very long status" >/dev/null
+  local out list show
+  out=$("$ROUNDS")
+  assert_contains "$out" "…" "a long field is clipped with an ellipsis"
+  assert_not_contains "$out" "$long" "the whole long field is not pasted into the row"
+  list=$("$AREA" list)
+  assert_contains "$list" "verbose" "list still names the area"
+  assert_not_contains "$list" "$long" "list clips the next step too"
+  show=$("$AREA" show verbose)
+  assert_contains "$show" "$long" "show prints the field whole"
+  rm -f "$FOREMAN_HOME/house/areas/verbose.md"
+  pass "rounds and list clip; show stays whole"
+}
+
+test_stale_days_env_is_validated() {
+  local out
+  if HOUSE_STALE_DAYS=nope "$ROUNDS" >/dev/null 2>&1; then fail "a non-numeric HOUSE_STALE_DAYS was accepted"; fi
+  out=$(HOUSE_STALE_DAYS=1000 "$ROUNDS")
+  assert_contains "$out" "0 stale" "a numeric HOUSE_STALE_DAYS is honoured"
+  pass "HOUSE_STALE_DAYS is validated like --stale-days"
+}
+
 test_empty
 test_marks_no_next_and_stale
 test_no_next_is_marked
+test_whitespace_next_is_not_a_next
 test_stale_bound_is_configurable
 test_digest_is_one_line
 test_all_includes_archived
+test_house_today_is_utc
+test_future_updated_is_stale
+test_stale_days_env_is_validated
+test_rows_clip_long_fields

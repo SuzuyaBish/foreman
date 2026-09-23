@@ -25,6 +25,14 @@ HOUSE_OUTBOX="$HOUSE_DIR/outbox"
 # thread with no repository (deliver a report).
 HOUSE_KINDS="repo chat deck craft other"
 
+# House speaks as House, never as the foreman: a refusal from a house script
+# must not name a different persona. `FOREMAN_MODE=house` is the launcher's
+# marker, but the voice is House's regardless of how the script was reached.
+house_die() {
+  printf 'house: %s\n' "$*" >&2
+  exit 1
+}
+
 house_slug_ok() { foreman_valid_id "${1:-}"; }
 
 house_kind_ok() {
@@ -39,8 +47,10 @@ house_area_path() { printf '%s/%s.md' "$HOUSE_AREAS" "$1"; }
 house_archived_path() { printf '%s/%s.md' "$HOUSE_ARCHIVED" "$1"; }
 
 # The chart for a slug, active or archived; prints nothing and fails when
-# neither exists.
+# neither exists. The slug is validated here too, so a traversal like
+# `show ../secret` can never reach a file outside the chart.
 house_find_area() {
+  house_slug_ok "${1:-}" || return 1
   local p
   p=$(house_area_path "${1:-}")
   if [ -f "$p" ]; then
@@ -58,66 +68,235 @@ house_find_area() {
 # The active chart for a slug, or die. Diagnostics and prescribing only ever
 # act on an active area; `show` is the one verb that also reads the archived.
 house_require_area() {
-  house_slug_ok "${1:-}" || foreman_die "bad area slug: ${1:-<none>} (lowercase letters, digits and dashes; max 32)"
+  house_slug_ok "${1:-}" || house_die "bad area slug: ${1:-<none>} (lowercase letters, digits and dashes; max 32)"
   local p
   p=$(house_area_path "$1")
-  [ -f "$p" ] || foreman_die "no such area: $1"
+  if [ ! -f "$p" ]; then
+    [ -f "$(house_archived_path "$1")" ] && house_die "area $1 is archived; run: house-area.sh unarchive $1"
+    house_die "no such area: $1"
+  fi
   printf '%s' "$p"
 }
 
 # One header field, or nothing. Anchored so a log line can never answer for a
-# field.
+# field, and only the first when a hand-edited chart carries a duplicate.
 house_field() { # <path> <key>
   sed -n "s/^$2: //p" "$1" 2>/dev/null | head -n 1
 }
 
-# Replace a header field in place, inserting it before "## Log" when the chart
-# does not have it yet (a hand-edited or hand-written chart). Atomic via a
-# temp file and mv, so a reader never sees half a chart.
-house_set_field() { # <path> <key> <value>
-  local path=$1 key=$2 value=$3 tmp
+# Chart fields are one physical line each. A value carrying a newline or tab
+# would inject a second field or split the log, so every path that writes a
+# field runs the value through here first. A carriage return is refused with
+# them: a CRLF value would otherwise read back with a trailing CR.
+house_sanitize_field() { # <key> <value> -> prints the value, or dies
+  local key=${1:-field} value=${2-}
+  case "$value" in
+  *$'\n'* | *$'\t'* | *$'\r'*)
+    house_die "$key must be one line (no newline, carriage return or tab)"
+    ;;
+  esac
+  printf '%s' "$value"
+}
+
+# A log line is one line too, but a note is prose: flatten rather than refuse,
+# so a multi-line thought still charts as one dated line.
+house_flatten_log() { # <text>
+  printf '%s' "${1-}" | tr '\t\r\n' '   '
+}
+
+# Whitespace with nothing in it is not a next step. Fold it to empty before any
+# guard tests it, so `[no next]` and prescribe's check cannot be defeated by
+# spaces.
+house_trim() { # <text>
+  printf '%s' "${1-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# One writer per chart, the same mkdir primitive crew-send.sh uses for the
+# inbox: atomic everywhere that matters, and it gives up rather than wait
+# forever behind a writer that died holding it.
+house_lock_acquire() { # <lock-dir>
+  local i
+  for i in $(seq 1 400); do
+    mkdir "$1" 2>/dev/null && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+# The one writer. Every field set and every log append goes through here, under
+# a per-chart lock, rewriting the whole chart with a temp and mv so no reader
+# ever sees it half-written and no writer can lose another's append. Values
+# reach awk through a tab-separated directives file, never `-v`, so a backslash
+# stays a backslash instead of becoming an escape. A key's first line is
+# replaced and its later duplicates dropped, so a hand-edited duplicate heals
+# on the next write. Missing fields go before "## Log", or before the first log
+# line, or a "## Log" header is created; the log lines are appended last.
+house_edit() { # <path> [--set <key> <value>]... [--log <date> <text>]...
+  local path=$1
+  shift
+  [ -f "$path" ] || house_die "no such chart: $path"
+
+  # Validate and collect every value first, so a bad value aborts before the
+  # chart, the lock or any temp file is touched. There is no EXIT trap: a trap
+  # that removes "$lock" can fire for a process that never held it (or after a
+  # local has gone out of scope) and open the critical section to two writers,
+  # which is exactly the lost append this function exists to prevent. Cleanup is
+  # explicit on every path this function can take; only a hard kill leaks a lock,
+  # the same as the inbox lock in crew-send.sh.
+  local -a skeys=() svals=() ldates=() ltexts=()
+  local ns=0 nl=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    --set)
+      [ $# -ge 3 ] || house_die "internal: house_edit --set needs a key and a value"
+      local sval
+      sval=$(house_sanitize_field "$2" "$3") || exit 1
+      skeys[$ns]=$2
+      svals[$ns]=$sval
+      ns=$((ns + 1))
+      shift 3
+      ;;
+    --log)
+      [ $# -ge 3 ] || house_die "internal: house_edit --log needs a date and text"
+      local lval
+      lval=$(house_flatten_log "$3") || exit 1
+      ldates[$nl]=$2
+      ltexts[$nl]=$lval
+      nl=$((nl + 1))
+      shift 3
+      ;;
+    *)
+      house_die "internal: bad house_edit operation: $1"
+      ;;
+    esac
+  done
+
+  local dirs tmp lock i
+  dirs=$(mktemp "${TMPDIR:-/tmp}/house-edit.XXXXXX") || house_die "could not stage chart edits"
+  i=0
+  while [ "$i" -lt "$ns" ]; do
+    printf 'S\t%s\t%s\n' "${skeys[$i]}" "${svals[$i]}" >>"$dirs"
+    i=$((i + 1))
+  done
+  i=0
+  while [ "$i" -lt "$nl" ]; do
+    printf 'L\t%s\t%s\n' "${ldates[$i]}" "${ltexts[$i]}" >>"$dirs"
+    i=$((i + 1))
+  done
+
   tmp="$path.tmp.$$"
-  awk -v key="$key" -v val="$value" '
-    BEGIN { done = 0; seen_log = 0 }
+  lock="$path.lock"
+  if ! house_lock_acquire "$lock"; then
+    rm -f "$dirs"
+    house_die "could not lock chart $path (another writer is busy)"
+  fi
+
+  if ! awk -F '\t' '
+    FILENAME == ARGV[1] {
+      if ($1 == "S") { skey[$2] = $3; if (!($2 in order)) order[++n] = $2 }
+      else if ($1 == "L") { ldate[++m] = $2; ltext[m] = $3 }
+      next
+    }
     {
-      if (index($0, key ":") == 1) { print key ": " val; done = 1; next }
-      if (!seen_log && $0 ~ /^## Log/) {
-        if (!done) { print key ": " val; done = 1 }
-        seen_log = 1
+      isfield = ""
+      for (i = 1; i <= n; i++) {
+        k = order[i]
+        if (index($0, k ":") == 1) { isfield = k; break }
       }
+      if (isfield != "") {
+        if (!(isfield in placed)) { print isfield ": " skey[isfield]; placed[isfield] = 1 }
+        next
+      }
+      is_header = ($0 ~ /^## Log/) ? 1 : 0
+      is_log = ($0 ~ /^- /) ? 1 : 0
+      if (!inserted && (is_header || is_log)) {
+        for (i = 1; i <= n; i++) {
+          k = order[i]
+          if (!(k in placed)) { print k ": " skey[k]; placed[k] = 1 }
+        }
+        if (!header_seen && !is_header) { print ""; print "## Log"; emitted_header = 1 }
+        inserted = 1
+      }
+      if (is_header) { header_seen = 1; emitted_header = 1 }
       print
     }
-    END { if (!done) print key ": " val }
-  ' "$path" >"$tmp" && mv "$tmp" "$path"
+    END {
+      if (!inserted) {
+        for (i = 1; i <= n; i++) {
+          k = order[i]
+          if (!(k in placed)) { print k ": " skey[k]; placed[k] = 1 }
+        }
+      }
+      if (m > 0) {
+        if (!emitted_header) { print ""; print "## Log" }
+        for (i = 1; i <= m; i++) print "- " ldate[i] " - " ltext[i]
+      }
+    }
+  ' "$dirs" "$path" >"$tmp"; then
+    rm -f "$tmp" "$dirs"
+    rmdir "$lock" 2>/dev/null || true
+    house_die "could not write chart $path"
+  fi
+  if ! mv "$tmp" "$path"; then
+    rm -f "$tmp" "$dirs"
+    rmdir "$lock" 2>/dev/null || true
+    house_die "could not replace chart $path"
+  fi
+  rm -f "$dirs"
+  # Release with rmdir, never `rm -rf`: `rm -rf` re-checks and can remove a lock
+  # another writer created in the gap, which reopens the critical section and
+  # loses an append. rmdir is one atomic syscall on the empty lock directory.
+  rmdir "$lock" 2>/dev/null || true
 }
 
-# Append a dated line to the log, ending with a newline even if the file did
-# not.
-house_log_append() { # <path> <date> <text>
-  local path=$1 date=$2 text=$3
-  [ -z "$(tail -c 1 "$path" 2>/dev/null)" ] || printf '\n' >>"$path"
-  printf -- '- %s - %s\n' "$date" "$text" >>"$path"
-}
-
-house_today() { date +%Y-%m-%d; }
+# One convention, UTC everywhere. `updated` is written as a UTC civil date and
+# the age is a difference of UTC calendar days, so the stale boundary does not
+# move with the reader's TZ.
+house_today() { date -u +%Y-%m-%d; }
 house_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 house_ts() { date -u +%Y%m%dT%H%M%SZ; }
 
-# A YYYY-MM-DD date to epoch, GNU or BSD date.
+# A YYYY-MM-DD date to epoch at UTC midnight, GNU or BSD date.
 house_epoch_date() { # <YYYY-MM-DD>
-  date -j -f '%Y-%m-%d' "$1" +%s 2>/dev/null ||
-    date -d "$1" +%s 2>/dev/null || printf ''
+  TZ=UTC0 date -j -f '%Y-%m-%d' "$1" +%s 2>/dev/null ||
+    TZ=UTC0 date -d "$1" +%s 2>/dev/null || printf ''
 }
 
-# Days since the chart was last touched; empty when the date is unreadable.
+# Whole UTC calendar days since the chart was last written. Negative for a date
+# in the future, empty when the date is unreadable. Calendar days, not elapsed
+# seconds, so `house_today` and the field are always read the same way.
 house_age_days() { # <path>
-  local updated since now
+  local updated since today today_epoch
   updated=$(house_field "$1" updated)
   [ -n "$updated" ] || return 1
   since=$(house_epoch_date "$updated")
   [ -n "$since" ] || return 1
-  now=$(date +%s)
-  printf '%s' "$(((now - since) / 86400))"
+  today=$(house_today)
+  today_epoch=$(house_epoch_date "$today")
+  [ -n "$today_epoch" ] || return 1
+  printf '%s' "$(((today_epoch - since) / 86400))"
+}
+
+# A compact relative age for the glanceable rows: `2d`, `0d`. A future date reads
+# as `0d`; the caller's marks say `[future]`.
+house_age_label() { # <path>
+  local age
+  age=$(house_age_days "$1" 2>/dev/null || printf '')
+  [ -n "$age" ] || return 1
+  [ "$age" -lt 0 ] && age=0
+  printf '%s' "${age}d"
+}
+
+# Clip a one-line field for a compact table: at most <width> characters, with an
+# ellipsis when it was cut. `area show` prints the file whole; only the
+# glanceable rows clip.
+house_clip() { # <text> <width>
+  local text=${1-} width=${2:-40}
+  if [ "${#text}" -le "$width" ]; then
+    printf '%s' "$text"
+  else
+    printf '%s…' "${text:0:$((width - 1))}"
+  fi
 }
 
 # Every active slug, sorted. With --all, archived slugs follow and are marked
@@ -141,16 +320,34 @@ house_slugs() { # [--all]
   fi
 }
 
-# The newest outbox file for a slug, or nothing.
+# The newest outbox file for a slug, or nothing. Prescriptions are named
+# `<slug>-<ts>.md`, with `-2`, `-3` appended when two land in the same second,
+# so "newest" is the largest timestamp and then the largest numeric suffix. A
+# plain string compare reads `.` (0x2E) as greater than `-` (0x2D) and returns
+# the older `-2` file, which is exactly the bug this replaced.
 house_latest_outbox() { # <slug>
-  local f best='' best_key=''
+  local f slug=${1:-} best='' best_ts='' best_suf=0 ts suf rest
   [ -d "$HOUSE_OUTBOX" ] || return 0
-  for f in "$HOUSE_OUTBOX/$1"-*.md; do
+  for f in "$HOUSE_OUTBOX/$slug"-*.md; do
     [ -e "$f" ] || continue
-    if [ -z "$best_key" ] || [ "$f" \> "$best_key" ]; then
-      best=$f
-      best_key=$f
+    rest=${f##*/}
+    rest=${rest#"$slug"-}
+    rest=${rest%.md}
+    ts=${rest%%-*}
+    suf=${rest#"$ts"}
+    suf=${suf#-}
+    case "$suf" in
+    '' | *[!0-9]*) suf=1 ;;
+    esac
+    if [ -n "$best" ]; then
+      [ "$ts" \< "$best_ts" ] && continue
+      if [ "$ts" = "$best_ts" ] && [ "$suf" -le "$best_suf" ]; then
+        continue
+      fi
     fi
+    best=$f
+    best_ts=$ts
+    best_suf=$suf
   done
   [ -n "$best" ] && printf '%s' "$best"
   # Always succeed: an absent outbox is a normal answer, and a nonzero here

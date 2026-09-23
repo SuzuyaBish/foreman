@@ -31,7 +31,7 @@ case "${1:-}" in
 esac
 
 SLUG=${1:-}
-[ -n "$SLUG" ] || foreman_die "usage: house-send.sh <slug> [--yes]"
+[ -n "$SLUG" ] || house_die "usage: house-send.sh <slug> [--yes]"
 shift
 
 YES=0
@@ -41,14 +41,20 @@ while [ $# -gt 0 ]; do
     YES=1
     shift
     ;;
-  *) foreman_die "unknown send option: $1 (try --help)" ;;
+  *) house_die "unknown send option: $1 (try --help)" ;;
   esac
 done
 
 path=$(house_require_area "$SLUG")
 BIND=$(house_field "$path" bind)
 if [ -z "$BIND" ]; then
-  foreman_die "area $SLUG has no bind; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
+  # A ready prescription is more useful than telling the captain to run
+  # prescribe --copy again: point at the file that already exists.
+  ready=$(house_latest_outbox "$SLUG")
+  if [ -n "$ready" ]; then
+    house_die "area $SLUG has no bind; a prescription is ready at $ready — paste it into the session, or set a bind"
+  fi
+  house_die "area $SLUG has no bind; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
 fi
 
 # A bind names a crew task, optionally with a `crew:` prefix. Anything else is
@@ -57,16 +63,16 @@ TARGET=${BIND#crew:}
 TARGET=${TARGET#task:}
 case "$TARGET" in
 '' | *[!abcdefghijklmnopqrstuvwxyz0123456789-]*)
-  foreman_die "bind '$BIND' is not a crew task; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
+  house_die "bind '$BIND' is not a crew task; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
   ;;
 esac
 if [ ! -d "$FOREMAN_TASKS/$TARGET" ]; then
-  foreman_die "bind '$BIND' names no crew task; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
+  house_die "bind '$BIND' names no crew task; run: house-prescribe.sh $SLUG --copy  (then paste it into the session)"
 fi
 
 outfile=$(house_latest_outbox "$SLUG")
 if [ -z "$outfile" ]; then
-  foreman_die "no prescription for $SLUG yet; run: house-prescribe.sh $SLUG"
+  house_die "no prescription for $SLUG yet; run: house-prescribe.sh $SLUG"
 fi
 
 if [ "$path" -nt "$outfile" ]; then
@@ -88,5 +94,16 @@ if [ "$YES" -eq 0 ]; then
 fi
 
 printf 'house: sending %s to crew %s\n' "$SLUG" "$TARGET" >&2
-"$FOREMAN_ROOT/bin/crew-send.sh" "$TARGET" "$PROMPT"
-printf 'house: sent %s to crew %s\n' "$SLUG" "$TARGET"
+SEND_OUT=$("$FOREMAN_ROOT/bin/crew-send.sh" "$TARGET" "$PROMPT")
+# crew-send records the durable inbox file first and rings the pane second. An
+# unringable pane (no endpoint, or a dead agent) is not a failure, but it is not
+# a send either: say what actually happened so the captain does not wait on a
+# doorbell that was never rung.
+case "$SEND_OUT" in
+*pane\ doorbell:\ yes*)
+  printf 'house: sent %s to crew %s\n' "$SLUG" "$TARGET"
+  ;;
+*)
+  printf 'house: recorded for crew %s; doorbell not rung — it will be picked up when the crew is reachable\n' "$TARGET"
+  ;;
+esac

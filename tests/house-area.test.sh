@@ -13,7 +13,7 @@ NEXT="$BIN/house-next.sh"
 AREAS="$FOREMAN_HOME/house/areas"
 ARCHIVED="$FOREMAN_HOME/house/archived"
 CHART="$AREAS/atlas.md"
-TODAY=$(date +%Y-%m-%d)
+TODAY=$(date -u +%Y-%m-%d)
 
 field() { # <path> <key>
   sed -n "s/^$2: //p" "$1" 2>/dev/null | head -n 1
@@ -89,6 +89,109 @@ test_note_and_next() {
   pass "a note is dated, and one note can carry status and next"
 }
 
+test_backslash_is_literal() {
+  "$AREA" add esc --kind repo >/dev/null
+  "$NEXT" esc 'C:\new\table' >/dev/null
+  assert_equals 'C:\new\table' "$(field "$AREAS/esc.md" next)" "a backslash value is stored literally"
+  pass "a backslash is a backslash, not an escape"
+}
+
+test_newline_cannot_inject_a_field() {
+  local rc
+  "$AREA" add inject --kind repo --title "$(printf 'Innocent\nnext: pwned')" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a title with a newline was accepted"
+  assert_absent "$AREAS/inject.md" "a rejected add writes no chart"
+  "$NEXT" esc "ok" >/dev/null
+  "$NOTE" esc --status "$(printf 'fine\nnext: pwned')" "a note" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a status with a newline was accepted"
+  assert_not_contains "$(cat "$AREAS/esc.md")" "pwned" "the injected field never landed"
+  rm -f "$AREAS/esc.md"
+  pass "a newline in a field value is refused, not written"
+}
+
+test_a_rejected_note_writes_nothing() {
+  "$AREA" add atomic --kind repo >/dev/null
+  local before rc n
+  before=$(cat "$AREAS/atomic.md")
+  "$NOTE" atomic --status "$(printf 'bad\nstatus: x')" "the note text" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a newline status was accepted"
+  assert_equals "$before" "$(cat "$AREAS/atomic.md")" "a rejected note leaves the chart untouched"
+  assert_not_contains "$(cat "$AREAS/atomic.md")" "the note text" "the note text was not half-written"
+  n=$(find "$AREAS" -name 'atomic.md.tmp.*' | wc -l | tr -d ' ')
+  assert_equals "0" "$n" "no temp file is left behind"
+  rm -f "$AREAS/atomic.md"
+  pass "a rejected note is all-or-nothing, with no temp left"
+}
+
+test_duplicate_fields_heal_on_write() {
+  "$AREA" add dup --kind repo >/dev/null
+  printf 'status: first\nstatus: second\n' >>"$AREAS/dup.md"
+  "$NOTE" dup --status 'the one' 'a note' >/dev/null
+  local n
+  n=$(grep -c '^status:' "$AREAS/dup.md")
+  assert_equals "1" "$n" "a duplicate field is dropped on the next write"
+  assert_equals "the one" "$(field "$AREAS/dup.md" status)" "the surviving field is the new value"
+  rm -f "$AREAS/dup.md"
+  pass "a hand-edited duplicate field heals on the next write"
+}
+
+test_concurrent_notes_do_not_lose_appends() {
+  "$AREA" add race --kind repo >/dev/null
+  local i n
+  for i in $(seq 1 40); do
+    "$NOTE" race "n$i" >/dev/null 2>&1 &
+  done
+  wait
+  n=$(grep -c '^- ' "$AREAS/race.md")
+  assert_equals "40" "$n" "all concurrent appends survive the single writer"
+  rm -f "$AREAS/race.md"
+  pass "concurrent notes cannot lose each other's log line"
+}
+
+test_note_creates_the_log_header() {
+  mkdir -p "$AREAS"
+  {
+    printf 'slug: hand\nkind: repo\nupdated: 2020-01-01\nstatus: ok\nnext: x\n\n'
+    printf -- '- 2020-01-01 - an existing log line\n'
+  } >"$AREAS/hand.md"
+  "$NOTE" hand 'a new note' >/dev/null
+  local content first new
+  content=$(cat "$AREAS/hand.md")
+  assert_contains "$content" "## Log" "a chart without a log header gets one"
+  assert_contains "$content" "- 2020-01-01 - an existing log line" "the existing log line survives"
+  assert_contains "$content" "a new note" "the new note is logged"
+  first=$(printf '%s\n' "$content" | grep -n 'an existing log line' | cut -d: -f1)
+  new=$(printf '%s\n' "$content" | grep -n 'a new note' | cut -d: -f1)
+  [ -n "$first" ] && [ -n "$new" ] && [ "$new" -gt "$first" ] || fail "the new note must follow the existing log line"
+  rm -f "$AREAS/hand.md"
+  pass "a chart with no ## Log gets a header before its log, not a field after it"
+}
+
+test_note_appends_a_log_to_a_headerless_chart() {
+  printf 'slug: bare\nkind: repo\nupdated: 2020-01-01\nstatus: ok\nnext: x\n' >"$AREAS/bare.md"
+  "$NOTE" bare 'first note' >/dev/null
+  local content
+  content=$(cat "$AREAS/bare.md")
+  assert_contains "$content" "## Log" "the log header is created"
+  assert_contains "$content" "- $(date -u +%Y-%m-%d) - first note" "the note is logged"
+  rm -f "$AREAS/bare.md"
+  pass "a headerless chart gets a log rather than a stray field after the log lines"
+}
+
+test_show_refuses_a_traversal_slug() {
+  printf 'TOP SECRET\n' >"$FOREMAN_HOME/house/secret.md"
+  local out rc
+  out=$("$AREA" show '../secret' 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a traversal slug was accepted by show"
+  assert_not_contains "$out" "TOP SECRET" "show did not cat a file outside the chart"
+  if "$AREA" show '../../../../tmp/secret' >/dev/null 2>&1; then fail "an absolute-ish traversal was accepted"; fi
+  pass "show refuses a slug that could reach outside the chart"
+}
+
 test_archive_retires_but_keeps() {
   local out
   out=$("$AREA" archive atlas)
@@ -104,9 +207,30 @@ test_archive_retires_but_keeps() {
   pass "archiving retires an area and keeps its chart"
 }
 
+test_unarchive_returns_the_area() {
+  local out
+  out=$("$AREA" unarchive atlas)
+  assert_contains "$out" "unarchived area atlas" "unarchive reports the area"
+  assert_present "$CHART" "the chart is active again"
+  assert_absent "$ARCHIVED/atlas.md" "the archived copy is gone"
+  assert_contains "$("$AREA" list)" "atlas" "the area is listed again"
+  if "$AREA" unarchive atlas >/dev/null 2>&1; then fail "unarchiving an active area was accepted"; fi
+  if "$AREA" unarchive ghost >/dev/null 2>&1; then fail "unarchiving a missing area was accepted"; fi
+  pass "unarchive is the way back out of the archive"
+}
+
 test_empty_list
 test_add_creates_a_chart
 test_list_and_show
 test_refusals
+test_show_refuses_a_traversal_slug
 test_note_and_next
+test_backslash_is_literal
+test_newline_cannot_inject_a_field
+test_a_rejected_note_writes_nothing
+test_duplicate_fields_heal_on_write
+test_note_creates_the_log_header
+test_note_appends_a_log_to_a_headerless_chart
+test_concurrent_notes_do_not_lose_appends
 test_archive_retires_but_keeps
+test_unarchive_returns_the_area

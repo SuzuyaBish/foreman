@@ -41,16 +41,23 @@ while [ $# -gt 0 ]; do
     shift
     ;;
   --stale-days)
-    [ $# -ge 2 ] || foreman_die "--stale-days requires a number"
+    [ $# -ge 2 ] || house_die "--stale-days requires a number"
     case "$2" in
-    '' | *[!0-9]*) foreman_die "--stale-days requires a whole number of days" ;;
+    '' | *[!0-9]*) house_die "--stale-days requires a whole number of days" ;;
     esac
     STALE_DAYS=$2
     shift 2
     ;;
-  *) foreman_die "unknown rounds option: $1 (try --help)" ;;
+  *) house_die "unknown rounds option: $1 (try --help)" ;;
   esac
 done
+
+# The bound may come from the environment or the flag; validate whichever one
+# is in force, so `HOUSE_STALE_DAYS=nope` fails once instead of printing a bad
+# integer comparison for every row.
+case "$STALE_DAYS" in
+'' | *[!0-9]*) house_die "stale days must be a whole number (got: ${HOUSE_STALE_DAYS:-})" ;;
+esac
 
 total=0
 stale_count=0
@@ -76,15 +83,18 @@ for slug in $slugs; do
   [ -f "$path" ] || continue
   total=$((total + 1))
   kind=$(house_field "$path" kind)
-  updated=$(house_field "$path" updated)
   status=$(house_field "$path" status)
-  next=$(house_field "$path" next)
+  next=$(house_trim "$(house_field "$path" next)")
 
   marks=
+  age_label=$(house_age_label "$path" || printf '')
   age=$(house_age_days "$path" 2>/dev/null || printf '')
   if [ -z "$age" ]; then
     stale=1
     marks="$marks [stale ?]"
+  elif [ "$age" -lt 0 ]; then
+    stale=1
+    marks="$marks [future]"
   elif [ "$age" -gt "$STALE_DAYS" ]; then
     stale=1
     marks="$marks [stale ${age}d]"
@@ -98,8 +108,9 @@ for slug in $slugs; do
   fi
   [ "$archived" -eq 1 ] && marks="$marks [archived]"
 
-  row=$(printf '%-18s %-6s %-10s status: %s  next: %s%s' \
-    "$slug" "${kind:--}" "${updated:--}" "${status:--}" "${next:--}" "$marks")
+  row=$(printf '%-18s %-6s %-4s status: %-40s next: %s%s' \
+    "$slug" "${kind:--}" "${age_label:--}" \
+    "$(house_clip "${status:--}" 40)" "$(house_clip "${next:--}" 40)" "$marks")
   if [ -z "$lines" ]; then
     lines=$row
   else

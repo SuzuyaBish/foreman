@@ -29,22 +29,19 @@ case "${1:-}" in
 esac
 
 SLUG=${1:-}
-[ -n "$SLUG" ] || foreman_die "usage: house-next.sh <slug> <text...> | --clear"
+[ -n "$SLUG" ] || house_die "usage: house-next.sh <slug> <text...> | --clear"
 shift
 
 if [ "${1:-}" = --clear ]; then
-  [ $# -eq 1 ] || foreman_die "--clear takes no text"
+  [ $# -eq 1 ] || house_die "--clear takes no text"
   path=$(house_require_area "$SLUG")
-  house_set_field "$path" next ""
-  house_set_field "$path" updated "$(house_today)"
+  house_edit "$path" --set next "" --set updated "$(house_today)"
   printf 'house: cleared next for %s\n' "$SLUG"
   exit 0
 fi
 
 TEXT=${*-}
-[ -n "$TEXT" ] || foreman_die "usage: house-next.sh <slug> <text...> | --clear"
-TEXT=$(printf '%s' "$TEXT" | tr '\t\n' '  ')
+[ -n "$TEXT" ] || house_die "usage: house-next.sh <slug> <text...> | --clear"
 path=$(house_require_area "$SLUG")
-house_set_field "$path" next "$TEXT"
-house_set_field "$path" updated "$(house_today)"
+house_edit "$path" --set next "$TEXT" --set updated "$(house_today)"
 printf 'house: next for %s: %s\n' "$SLUG" "$TEXT"

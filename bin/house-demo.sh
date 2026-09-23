@@ -78,11 +78,11 @@ seed() {
   while [ $# -gt 0 ]; do
     case "$1" in
     --bind)
-      [ $# -ge 2 ] || foreman_die "--bind requires a value"
+      [ $# -ge 2 ] || house_die "--bind requires a value"
       bind=$2
       shift 2
       ;;
-    *) foreman_die "unknown seed option: $1 (try --help)" ;;
+    *) house_die "unknown seed option: $1 (try --help)" ;;
     esac
   done
 
@@ -96,7 +96,7 @@ seed() {
     house_demo_marked "$path" || refused="$refused $slug"
   done
   if [ -n "$refused" ]; then
-    foreman_die "refusing to overwrite non-demo area(s):$refused (they lack the '$HOUSE_DEMO_MARKER' marker)"
+    house_die "refusing to overwrite non-demo area(s):$refused (they lack the '$HOUSE_DEMO_MARKER' marker)"
   fi
 
   local stale
@@ -143,12 +143,13 @@ seed() {
 }
 
 clear() {
-  local slug path f removed=0
+  local slug path f removed=0 demo_slugs=" "
   for slug in $HOUSE_DEMO_SLUGS; do
     path=$(house_area_path "$slug")
     [ -f "$path" ] || continue
     if house_demo_marked "$path"; then
       rm -f "$path"
+      demo_slugs="$demo_slugs$slug "
       printf 'house: removed demo area %s\n' "$slug"
       removed=$((removed + 1))
     else
@@ -156,10 +157,21 @@ clear() {
     fi
   done
 
-  # Prescriptions the fixture wrote are part of the fixture, whatever became
-  # of the chart. The glob is literal when there is no outbox, and the -e guard
-  # skips it.
+  # A prescription belongs to the fixture only when the chart it was written
+  # for was one. A real chart at a demo slug must keep its real prescription, so
+  # only a slug the fixture itself removed licenses deleting its outbox. Anything
+  # else is left in place and named, never guessed away.
   for slug in $HOUSE_DEMO_SLUGS; do
+    case "$demo_slugs" in
+    *" $slug "*) ;;
+    *)
+      for f in "$HOUSE_OUTBOX/$slug"-*.md; do
+        [ -e "$f" ] || continue
+        printf 'house: kept prescription %s (area %s is not a demo fixture)\n' "${f##*/}" "$slug"
+      done
+      continue
+      ;;
+    esac
     for f in "$HOUSE_OUTBOX/$slug"-*.md; do
       [ -e "$f" ] || continue
       rm -f "$f"
@@ -180,10 +192,10 @@ case "$ACTION" in
   ;;
 seed) seed "$@" ;;
 clear)
-  [ $# -eq 0 ] || foreman_die "usage: house-demo.sh clear"
+  [ $# -eq 0 ] || house_die "usage: house-demo.sh clear"
   clear
   ;;
 *)
-  foreman_die "usage: house-demo.sh seed [--bind <crew-id>] | clear (try --help)"
+  house_die "usage: house-demo.sh seed [--bind <crew-id>] | clear (try --help)"
   ;;
 esac

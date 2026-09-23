@@ -29,7 +29,7 @@ case "${1:-}" in
 esac
 
 SLUG=${1:-}
-[ -n "$SLUG" ] || foreman_die "usage: house-note.sh <slug> [--status S] [--next N] <text...>"
+[ -n "$SLUG" ] || house_die "usage: house-note.sh <slug> [--status S] [--next N] <text...>"
 shift
 
 STATUS=
@@ -38,12 +38,12 @@ PARTS=()
 while [ $# -gt 0 ]; do
   case "$1" in
   --status)
-    [ $# -ge 2 ] || foreman_die "--status requires a value"
+    [ $# -ge 2 ] || house_die "--status requires a value"
     STATUS=$2
     shift 2
     ;;
   --next)
-    [ $# -ge 2 ] || foreman_die "--next requires a value"
+    [ $# -ge 2 ] || house_die "--next requires a value"
     NEXT=$2
     shift 2
     ;;
@@ -55,13 +55,14 @@ while [ $# -gt 0 ]; do
 done
 
 TEXT=${PARTS[*]-}
-[ -n "$TEXT" ] || foreman_die "usage: house-note.sh <slug> [--status S] [--next N] <text...>"
-# A log line is one line: a newline or tab would corrupt the chart.
-TEXT=$(printf '%s' "$TEXT" | tr '\t\n' '  ')
+[ -n "$TEXT" ] || house_die "usage: house-note.sh <slug> [--status S] [--next N] <text...>"
 
 path=$(house_require_area "$SLUG")
-house_log_append "$path" "$(house_today)" "$TEXT"
-house_set_field "$path" updated "$(house_today)"
-[ -z "$STATUS" ] || house_set_field "$path" status "$STATUS"
-[ -z "$NEXT" ] || house_set_field "$path" next "$NEXT"
+# One atomic rewrite: the note, the field sets and the bumped `updated` land
+# together, or none of them do. A bad --status is refused by house_edit before
+# the chart is touched, so there is no note left behind and no temp file.
+args=(--log "$(house_today)" "$TEXT" --set updated "$(house_today)")
+[ -z "$STATUS" ] || args+=(--set status "$STATUS")
+[ -z "$NEXT" ] || args+=(--set next "$NEXT")
+house_edit "$path" "${args[@]}"
 printf 'house: noted %s\n' "$SLUG"
