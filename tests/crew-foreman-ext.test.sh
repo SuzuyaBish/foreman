@@ -23,7 +23,7 @@ fi
 ROOTDIR=$(fm_tmproot crew-guard)
 mkdir -p "$ROOTDIR/.pi/extensions" "$ROOTDIR/node_modules/@earendil-works/pi-ai" \
   "$ROOTDIR/node_modules/@earendil-works/pi-coding-agent"
-cp "$ROOT/.pi/extensions/foreman.ts" "$ROOTDIR/.pi/extensions/foreman.ts"
+cp "$ROOT/.pi/extensions/"*.ts "$ROOTDIR/.pi/extensions/"
 # The extension resolves its install root at import time by looking for
 # bin/foreman-lib.sh above itself, so the temp copy needs one.
 mkdir -p "$ROOTDIR/bin"

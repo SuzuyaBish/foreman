@@ -24,10 +24,15 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-// A namespace import so the built-in tool factories can be read defensively:
-// a pi that does not export them (or a test stub with only `defineTool`) simply
-// has `undefined` here, where a named import would refuse to load the module.
-import * as sdkModule from "@earendil-works/pi-coding-agent";
+// Calm's presentation is a vendored, credited sibling module (see ./calm.ts).
+import {
+	calmIsActive,
+	installCalmAdapter,
+	installCalmAssistantLayout,
+	registerCalmBuiltins,
+	setCalm,
+	calmTool,
+} from "./calm.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -753,203 +758,27 @@ const lavishPoll = defineTool({
 
 // --- calm mode -------------------------------------------------------------
 //
-// Calm mode hides the foreman's own tool calls: the call line, its arguments
-// and its output collapse to nothing, so the captain reads only the responses.
-// It rides on the one rendering hook pi gives an extension - `renderCall`,
-// `renderResult` and `renderShell` on a tool definition. There is no global
-// tool-renderer override, so the extension's own tools are wrapped directly,
-// and pi's built-in tools are re-registered from their own definitions so the
-// override changes only how they are drawn. The status line, the widget, the
-// wake message and the responses are deliberately left alone.
+// The presentation itself lives in ./calm.ts, vendored from firstmate's Pi Calm
+// and credited there. This file owns only the foreman's wiring: the persisted
+// `crewCalm` flag, the `/crew calm` grammar, and reading the choice back at
+// session start. `calmIsActive()` is consulted when a row renders, so a toggle
+// redraws what is already on screen rather than only what comes next.
 
-/** True while the current session is quiet. Read at render time, so a toggle redraws at once. */
-let calmEnabled = configFlag("crewCalm", false);
+// Read once at load so a persisted choice is live before the first row draws;
+// session start re-reads it. This is the same `crewCalm` key the toggle writes.
+setCalm(configFlag("crewCalm", false));
 
 /**
- * Calm must hide assistant thinking as well as tool calls. Pi draws one
- * `AssistantMessageComponent` per assistant message - the streaming one and the
- * settled one - and that component is exported, so one prototype patch can drop
- * thinking content from a shallow presentation copy before pi lays it out. It
- * covers both of pi's thinking paths at once: visible thinking (Markdown) and
- * the collapsed `Text` label `hideThinkingBlock` draws, which a label change
- * alone cannot remove (pi wraps the label in the theme colour, so `Text` still
- * sees a non-empty string and draws a blank line). The stored message, the
- * model context and export rendering are never touched; only the copy handed to
- * the layout is filtered.
- *
- * The decision is read at render time through the shared patch object, so
- * toggling calm redraws thinking already on screen, and restoring `lastMessage`
- * to the real message means turning calm off brings it back. The wrapper is
- * installed once per process; a reload only refreshes its decision, so it can
- * never be double-wrapped with a stale flag.
- *
- * This mirrors the `collapsed-thinking` adapter in firstmate's Pi Calm, which
- * does the same against the exported component.
+ * Force pi to lay out the rows already on screen. `setHiddenThinkingLabel`
+ * makes pi re-run `updateContent` on every assistant row, which is what applies
+ * a toggle to thinking drawn before it, and the render it requests re-runs our
+ * tool rows too. firstmate's toggle does this; we borrow the invalidation while
+ * keeping our own render-time gate. Guarded because a headless UI has no such
+ * method, and it touches no status or widget, so the chrome does not move.
  */
-const CALM_ASSISTANT_LAYOUT = Symbol.for("foreman:calm-assistant-layout");
-
-function installCalmAssistantLayout() {
-	const registry = globalThis as Record<symbol, { hidesThinking: () => boolean } | undefined>;
-	const hidesThinking = () => calmEnabled;
-	const installed = registry[CALM_ASSISTANT_LAYOUT];
-	if (installed) {
-		installed.hidesThinking = hidesThinking;
-		return;
-	}
-	const component = (sdkModule as unknown as Record<string, any>).AssistantMessageComponent;
-	const original = component?.prototype?.updateContent;
-	if (typeof component !== "function" || typeof original !== "function") return;
-	const patch = { hidesThinking };
-	component.prototype.updateContent = function (message: any, ...rest: any[]) {
-		const state = this as { lastMessage?: unknown };
-		const thinking = Array.isArray(message?.content)
-			? message.content.filter((block: any) => block.type === "thinking")
-			: [];
-		const presentation = patch.hidesThinking() && thinking.length
-			? { ...message, content: message.content.filter((block: any) => block.type !== "thinking") }
-			: message;
-		original.call(this, presentation, ...rest);
-		// Re-render against the real message, so `invalidate()` (and a calm toggle)
-		// re-evaluates the rule instead of a copy that already lost its thinking.
-		if (presentation !== message) state.lastMessage = message;
-	};
-	registry[CALM_ASSISTANT_LAYOUT] = patch;
-}
-
-interface CalmComponent {
-	render(width: number): string[];
-	invalidate?(): void;
-}
-
-/**
- * A component whose lines vanish while calm mode is on. The decision is made
- * when the row renders, not when the tool ran, so toggling calm redraws the
- * calls already on screen instead of only the ones that come next.
- */
-function calmWrap(inner: CalmComponent): CalmComponent {
-	return {
-		invalidate() {
-			inner.invalidate?.();
-		},
-		render(width: number) {
-			return calmEnabled ? [] : inner.render(width);
-		},
-	};
-}
-
-/** Visible width, ignoring the SGR escapes the theme adds. */
-function calmVisible(text: string): number {
-	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").length;
-}
-
-/** Split a plain line by code point when it is wider than the row. */
-function wrapPlain(line: string, width: number): string[] {
-	if (width <= 0) return [line];
-	const chars = Array.from(line.replace(/\t/g, "   "));
-	if (chars.length <= width) return [chars.join("")];
-	const out: string[] = [];
-	for (let i = 0; i < chars.length; i += width) out.push(chars.slice(i, i + width).join(""));
-	return out;
-}
-
-function calmRole(isPartial: boolean, isError: boolean): "toolPendingBg" | "toolErrorBg" | "toolSuccessBg" {
-	if (isPartial) return "toolPendingBg";
-	return isError ? "toolErrorBg" : "toolSuccessBg";
-}
-
-/**
- * The padded, backgrounded block the default shell would draw for a tool. We
- * draw it ourselves because calm rows use `renderShell: "self"`, which is what
- * lets a quiet row render zero lines rather than an empty box above a blank
- * spacer - the difference between hiding a call and leaving a hole where it was.
- */
-function calmBlock(
-	theme: any,
-	role: "toolPendingBg" | "toolErrorBg" | "toolSuccessBg",
-	lines: string[],
-	top: boolean,
-	bottom: boolean,
-): CalmComponent {
-	return {
-		invalidate() {},
-		render(width: number) {
-			if (calmEnabled) return [];
-			const bg = (text: string) => (typeof theme?.bg === "function" ? theme.bg(role, text) : text);
-			const inner = Math.max(1, width - 2);
-			const out: string[] = [];
-			if (top) out.push(bg(" ".repeat(width)));
-			for (const raw of lines.length ? lines : [""]) {
-				for (const piece of wrapPlain(raw, inner)) {
-					const line = ` ${piece}`;
-					out.push(bg(line + " ".repeat(Math.max(0, width - calmVisible(line)))));
-				}
-			}
-			if (bottom) out.push(bg(" ".repeat(width)));
-			return out;
-		},
-	};
-}
-
-/**
- * Give one of the foreman's own tools calm-aware rendering. Calm off draws the
- * same block it always did; calm on draws nothing at all.
- */
-function calmTool(tool: any): any {
-	return {
-		...tool,
-		renderShell: "self",
-		renderCall(args: any, theme: any, ctx: any) {
-			const lines = [theme.fg("toolTitle", theme.bold(tool.name))];
-			const json = args === undefined ? "" : (JSON.stringify(args, null, 2) ?? "");
-			if (json) lines.push("", ...json.split("\n"));
-			return calmBlock(theme, calmRole(ctx.isPartial, ctx.isError), lines, true, false);
-		},
-		renderResult(result: any, _options: any, theme: any, ctx: any) {
-			const text = (result.content ?? [])
-				.map((c: any) => (c.type === "text" ? c.text : ""))
-				.join("\n");
-			return calmBlock(theme, calmRole(ctx.isPartial, ctx.isError), text ? text.split("\n") : [], false, true);
-		},
-	};
-}
-
-/** Wrap a built-in tool's own renderers, keeping its shell and its look. */
-function calmBuiltin(def: any): any {
-	if (!def.renderCall && !def.renderResult) return def;
-	// The built-in renderers reuse `context.lastComponent` and call methods on it
-	// for cheap streaming updates. We hand them the wrapper, not their own Text,
-	// so they must build fresh - pass `lastComponent: undefined` through.
-	const fresh = (ctx: any) => ({ ...ctx, lastComponent: undefined });
-	return {
-		...def,
-		renderCall: def.renderCall
-			? (args: any, theme: any, ctx: any) => calmWrap(def.renderCall(args, theme, fresh(ctx)))
-			: undefined,
-		renderResult: def.renderResult
-			? (result: any, options: any, theme: any, ctx: any) =>
-					calmWrap(def.renderResult(result, options, theme, fresh(ctx)))
-			: undefined,
-	};
-}
-
-/**
- * Re-register pi's built-in tools with calm-aware renderers. They are not ours,
- * but `create*ToolDefinition` hands back the whole definition - schema, execute
- * and renderers - so the override changes only how the call is drawn. A pi that
- * does not expose the factories leaves the built-ins untouched; the extension's
- * own tools still hide.
- */
-function registerCalmBuiltins(pi: ExtensionAPI) {
-	const sdk = sdkModule as unknown as Record<string, any>;
-	for (const name of ["read", "bash", "edit", "write", "find", "grep", "ls"]) {
-		const make = sdk[`create${name[0].toUpperCase()}${name.slice(1)}ToolDefinition`];
-		if (typeof make !== "function") continue;
-		try {
-			pi.registerTool(calmBuiltin(make(process.cwd())));
-		} catch {
-			// a definition we cannot shape is left as pi built it
-		}
-	}
+function redrawCalm(ctx: ExtensionContext): void {
+	if (!ctx.hasUI) return;
+	ctx.ui.setHiddenThinkingLabel?.(calmIsActive() ? "" : undefined);
 }
 
 // --- crew chrome -----------------------------------------------------------
@@ -1500,12 +1329,13 @@ export default function foreman(pi: ExtensionAPI) {
 		},
 		{
 			value: "calm",
-			describe: () => (calmEnabled ? "turn calm mode off" : "turn calm mode on"),
+			describe: () => (calmIsActive() ? "turn calm mode off" : "turn calm mode on"),
 			run: async (ctx) => {
-				const next = !calmEnabled;
+				const next = !calmIsActive();
 				await run("crew-config.sh", ["set", "crewCalm", next ? "true" : "false"], 500);
-				calmEnabled = next;
+				setCalm(next);
 				updateChrome(ctx);
+				redrawCalm(ctx);
 				ctx.ui.notify(`calm mode ${next ? "on" : "off"}`, "info");
 			},
 		},
@@ -1514,8 +1344,9 @@ export default function foreman(pi: ExtensionAPI) {
 			describe: () => "turn calm mode on",
 			run: async (ctx) => {
 				await run("crew-config.sh", ["set", "crewCalm", "true"], 500);
-				calmEnabled = true;
+				setCalm(true);
 				updateChrome(ctx);
+				redrawCalm(ctx);
 				ctx.ui.notify("calm mode on", "info");
 			},
 		},
@@ -1524,8 +1355,9 @@ export default function foreman(pi: ExtensionAPI) {
 			describe: () => "turn calm mode off",
 			run: async (ctx) => {
 				await run("crew-config.sh", ["set", "crewCalm", "false"], 500);
-				calmEnabled = false;
+				setCalm(false);
 				updateChrome(ctx);
+				redrawCalm(ctx);
 				ctx.ui.notify("calm mode off", "info");
 			},
 		},
@@ -1559,7 +1391,7 @@ export default function foreman(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		stopping = false;
-		calmEnabled = configFlag("crewCalm", false);
+		setCalm(configFlag("crewCalm", false));
 		updateChrome(ctx);
 		// Reconcile orphaned crew before anything else reads the board, so a
 		// session that starts after a crash sees the truth immediately.
@@ -1630,6 +1462,7 @@ export default function foreman(pi: ExtensionAPI) {
 			}
 		}
 		updateChrome(ctx);
+		redrawCalm(ctx);
 		startWatcher(pi);
 		const pending = countPending();
 		if (wakeEnabled() && pending > 0) {
@@ -1679,5 +1512,6 @@ export default function foreman(pi: ExtensionAPI) {
 	registerCalmBuiltins(pi);
 
 	// And collapse assistant thinking; the exported component carries the layout.
-	installCalmAssistantLayout();
+	// A pi that has moved the export degrades to normal rendering, not a crash.
+	installCalmAdapter("collapsed-thinking", installCalmAssistantLayout);
 }

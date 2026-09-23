@@ -20,7 +20,8 @@ EXTDIR="$ROOTDIR/.pi/extensions"
 mkdir -p "$EXTDIR" "$ROOTDIR/node_modules/@earendil-works/pi-ai" \
   "$ROOTDIR/node_modules/@earendil-works/pi-coding-agent"
 ln -s "$ROOT/bin" "$ROOTDIR/bin"
-cp "$ROOT/.pi/extensions/foreman.ts" "$EXTDIR/foreman.ts"
+# The extension and its vendored calm sibling, exactly as pi discovers them.
+cp "$ROOT/.pi/extensions/"*.ts "$EXTDIR/"
 
 cat >"$ROOTDIR/node_modules/@earendil-works/pi-ai/package.json" <<'JSON'
 { "name": "@earendil-works/pi-ai", "type": "module", "exports": "./index.js" }
@@ -38,9 +39,11 @@ export const defineTool = (tool) => tool;
 // keeps the same contract: updateContent records the content types, and
 // invalidate() re-renders the last real message the way pi's own does.
 export class AssistantMessageComponent {
+  static instances = [];
   constructor(message, hideThinkingBlock = false) {
     this.hideThinkingBlock = hideThinkingBlock;
     this.content = [];
+    AssistantMessageComponent.instances.push(this);
     if (message) this.updateContent(message);
   }
   updateContent(message) {
@@ -94,6 +97,10 @@ process.env.FOREMAN_HOME = home;
 
 const status = [];
 const widget = [];
+// What the toggle asked pi to redraw. Pi re-runs every assistant row's layout
+// when its hidden-thinking label is set, so this records both that the request
+// happened and that the fake rows actually re-laid out from it.
+const redraws = [];
 // A fake theme tags what it was asked to colour, so a test can assert the role.
 const theme = {
 	fg: (color, text) => `[[${color}]]${text}[[/${color}]]`,
@@ -107,6 +114,10 @@ const theme = {
 const ui = {
 	setStatus: (_key, text) => status.push(text),
 	setWidget: (_key, content) => widget.push(content),
+	setHiddenThinkingLabel: (label) => {
+		redraws.push(label === "" ? "calm-on" : label === undefined ? "calm-off" : "labelled");
+		for (const component of AssistantMessageComponent.instances) component.invalidate();
+	},
 	notify: () => {},
 	theme,
 };
@@ -220,6 +231,9 @@ await commands.crew.handler("calm on", ctx);
 process.stdout.write(`COMPLETE_CALM_ON_DESC|${completeDescs("calm")}\n`);
 calmComponent = new AssistantMessageComponent(thinkingMessage);
 process.stdout.write(`ASSISTANT_ON|${blocksOf(calmComponent)}\n`);
+// The toggle must ask pi to re-lay out the rows already on screen, not just the
+// next ones; pi does it by re-setting the hidden-thinking label.
+process.stdout.write(`CALM_REDRAW_ON|${redraws[redraws.length - 1]}\n`);
 process.stdout.write(`CONFIG|${fs.readFileSync(path.join(home, "config.json"), "utf8")}\n`);
 process.stdout.write(`CALM_CUSTOM_ON|${callLines(tools.crew_list, { action: "list" })}\n`);
 process.stdout.write(`CALM_RESULT_ON|${resultLines(tools.crew_list)}\n`);
@@ -230,9 +244,10 @@ process.stdout.write(`CALM_CHROME|${same ? "same" : "changed"}\n`);
 // A second look at the same row proves the toggle is live, not baked in at run time.
 await commands.crew.handler("calm off", ctx);
 process.stdout.write(`CALM_CUSTOM_AGAIN|${callLines(tools.crew_list, { action: "list" })}\n`);
-// The same instance, after the toggle: pi's invalidate() re-renders the real
-// message, so thinking comes back when calm goes off.
-calmComponent.invalidate();
+process.stdout.write(`CALM_REDRAW_OFF|${redraws[redraws.length - 1]}\n`);
+// No invalidate() by hand here: the toggle's own redraw request must re-lay out
+// the same row, so thinking returns because calm went off, not because the test
+// asked the component to look again.
 process.stdout.write(`ASSISTANT_AGAIN|${blocksOf(calmComponent)}\n`);
 
 // Reload: a fresh module instance reads the persisted setting off disk. This is
@@ -268,6 +283,33 @@ STATUS=$(printf '%s\n' "$OUT" | sed -n 's/^STATUS|//p')
 # the bits can be asserted the same way as the order of the widget lines.
 STATUS_BITS=$(printf '%s\n' "$STATUS" | awk -F' · ' '{ for (i = 1; i <= NF; i++) print $i }')
 WIDGET=$(printf '%s\n' "$OUT" | sed -n 's/^WIDGET|//p')
+
+# pi loads this extension through jiti, while this file loads it through node's
+# own type stripping. The vendored calm module is a relative `.ts` import, and
+# the two loaders resolve it by different machinery, so when a pi install is on
+# this machine load the real extension through that jiti too. The node path
+# above is the one this suite can always exercise; this skips when there is no
+# pi install rather than pretending to cover it.
+JITI_MJS=""
+for dir in $(ls -d "${HOME:-/nonexistent}"/.pi/agent/install/releases/*/node_modules/jiti 2>/dev/null | sort -V); do
+  [ -f "$dir/lib/jiti.mjs" ] && JITI_MJS="$dir/lib/jiti.mjs"
+done
+JITI_LOAD="(skipped)"
+if [ -n "$JITI_MJS" ]; then
+  JITI_HARNESS="$ROOTDIR/jiti.mjs"
+  cat >"$JITI_HARNESS" <<JS
+import { createJiti } from "$JITI_MJS";
+const jiti = createJiti(import.meta.url);
+process.env.FOREMAN_HOME = "$FOREMAN_HOME";
+delete process.env.FOREMAN_CREW;
+const mod = await jiti.import("$EXTDIR/foreman.ts");
+const tools = {}, commands = {};
+const pi = { on(){}, registerTool(t){ tools[t.name]=t; }, registerCommand(n,o){ commands[n]=o; }, sendMessage(){}, sendUserMessage(){} };
+await mod.default(pi);
+process.stdout.write("JITI|" + Object.keys(tools).length + "|" + (typeof commands.crew) + "\n");
+JS
+  JITI_LOAD=$(node "$JITI_HARNESS" 2>&1) || JITI_LOAD="(failed)"
+fi
 
 test_the_status_line_leads_with_what_is_owed() {
   assert_contains "$STATUS" "1 decision" "a keyed block reads as a decision"
@@ -388,6 +430,10 @@ test_calm_mode_hides_the_foremans_tool_calls() {
 
   # The renderers read the live flag, so the toggle redraws rows already on screen.
   assert_not_contains "$OUT" "CALM_CUSTOM_AGAIN|0" "the toggle is live, not baked in at run time"
+  # And it does not wait for the next row: the toggle asks pi to re-lay out the
+  # rows already on screen (its hidden-thinking label round-trip), both ways.
+  assert_equals "calm-on" "$(field CALM_REDRAW_ON)" "turning calm on redraws rows already on screen"
+  assert_equals "calm-off" "$(field CALM_REDRAW_OFF)" "turning calm off redraws them again"
 
   # And it survives a reload because the choice lives in config.json.
   assert_contains "$OUT" "CALM_RELOAD|0" "the calm choice survives a reload"
@@ -405,10 +451,24 @@ test_calm_mode_hides_the_foremans_tool_calls() {
 test_calm_mode_also_hides_assistant_thinking() {
   assert_equals "thinking,text" "$(field ASSISTANT_OFF)" "thinking is drawn while calm is off"
   assert_equals "text" "$(field ASSISTANT_ON)" "thinking blocks are dropped while calm is on"
-  # The reply is a different block and is never touched; the toggle redraws the
-  # rows already on screen because the patch keeps the real message for invalidate.
-  assert_equals "thinking,text" "$(field ASSISTANT_AGAIN)" "thinking returns when calm goes off, on the same row"
+  # The reply is a different block and is never touched. The restoration below is
+  # not the test calling invalidate(): the calm-off toggle's own redraw request is
+  # what re-lays out the row, which is the live behaviour the captain asked for.
+  assert_equals "thinking,text" "$(field ASSISTANT_AGAIN)" "the toggle brings thinking back on the same row"
   pass "calm mode collapses assistant thinking, live and reversible"
+}
+
+# The sibling import is the one thing that can take the whole extension down, so
+# it is pinned under both loaders: node above, pi's jiti here.
+test_the_vendored_calm_module_loads_under_pis_jiti() {
+  if [ -z "$JITI_MJS" ]; then
+    pass "jiti load check skipped (no pi install found)"
+    return 0
+  fi
+  assert_contains "$JITI_LOAD" "JITI|" "pi's jiti loads the extension and its vendored calm sibling"
+  assert_not_contains "$JITI_LOAD" "JITI|0|" "the extension registers its tools through jiti"
+  assert_contains "$JITI_LOAD" "|object" "the /crew command registers through jiti too"
+  pass "the vendored calm sibling resolves under pi's jiti as well as node"
 }
 
 line_of() { # <text> <needle> -> 1-based line number
@@ -662,6 +722,7 @@ test_the_widget_ranks_and_tiers_the_crew
 test_the_widget_can_be_turned_off
 test_calm_mode_hides_the_foremans_tool_calls
 test_calm_mode_also_hides_assistant_thinking
+test_the_vendored_calm_module_loads_under_pis_jiti
 test_the_crew_command_completes_its_arguments
 test_the_chrome_is_scoped_to_the_project_in_focus
 test_a_linked_item_folds_into_its_crews_row_and_the_budget_holds
