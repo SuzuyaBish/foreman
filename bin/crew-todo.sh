@@ -420,9 +420,20 @@ sync)
   while IFS=$'\t' read -r seq status crew text note scope; do
     [ -n "$seq" ] || continue
     [ -n "$note" ] || note=-
+    # A scope written before the write path resolved names can name a project
+    # by a variant spelling, and a row filed under one renders as a project of
+    # its own: one project would show as two groups. Fold any *present* scope
+    # that resolves to a registered project into that project's canonical name.
+    # A scope that names no project is left exactly as it is: the fold never
+    # rewrites or invents a scope it cannot resolve. `todo_scope_resolve` is the
+    # one rule for what a scope means; this is not a second one.
+    if [ -n "$scope" ]; then
+      scope=$(todo_scope_resolve "$scope" 2>/dev/null || printf '%s' "$scope")
+    fi
     # A proposal is the foreman's suggestion, not work a crew follows. It has
-    # no crew to reconcile against, so sync hands it back untouched - scope
-    # included: a suggestion never moves between projects behind the captain.
+    # no crew to reconcile against and no state to settle, so sync folds its
+    # scope like any row and otherwise hands it back untouched: a suggestion
+    # never moves between projects behind the captain.
     if [ "$status" = proposed ]; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$seq" "$status" "$crew" "$text" "$note" "$scope"
       continue

@@ -381,6 +381,36 @@ test_sync_backfills_scope_from_the_crew() {
   pass "rows from before scopes are filed correctly, and explicit scopes are respected"
 }
 
+# The class the write path cannot reach: a row filed before that path existed
+# still carries a variant spelling, and that one project then renders as two
+# groups. sync folds any *present* scope that resolves to a registered project
+# into that project's canonical name. A scope that names no registered project
+# is not ours to rewrite: the fold must leave it, and every row under it, alone.
+test_sync_folds_a_legacy_scope() {
+  local out
+  project_dir habit-tracker
+  # Two spellings the resolver folds (case; separators), and one stranger that
+  # names no project at all.
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' 940 open - "legacy case variant" - Habit_Tracker >>"$FOREMAN_HOME/todo.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' 941 open - "legacy separator variant" - habit_tracker >>"$FOREMAN_HOME/todo.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' 942 open - "stranger scope" - Legacy_Thing >>"$FOREMAN_HOME/todo.tsv"
+
+  "$TODO" sync >/dev/null
+
+  assert_equals "habit-tracker" "$(scope_of 940)" "a case variant folds to the registered project"
+  assert_equals "habit-tracker" "$(scope_of 941)" "a separator variant folds too"
+  assert_equals "Legacy_Thing" "$(scope_of 942)" "a scope that names no project is left exactly as it is"
+
+  # Exactly one group: the legacy spellings must not survive as group headers.
+  out=$("$TODO" list --all)
+  assert_equals "1" "$(printf '%s\n' "$out" | grep -cx "habit-tracker")" \
+    "the project renders as exactly one group"
+  assert_not_contains "$out" "Habit_Tracker" "no legacy spelling survives on the board"
+  assert_equals "1" "$(printf '%s\n' "$out" | grep -cx "Legacy_Thing")" \
+    "an unknown scope still renders as its own group"
+  pass "sync folds a legacy scope into its project and never invents one"
+}
+
 # --- scope write path -------------------------------------------------------
 #
 # A scope is free text in the row, so a misspelt project used to become a
@@ -490,6 +520,7 @@ test_scopes_keep_projects_apart
 test_focus_follows_the_newest_crew
 test_start_adopts_the_crews_project
 test_sync_backfills_scope_from_the_crew
+test_sync_folds_a_legacy_scope
 test_an_unknown_scope_resolves_or_is_refused
 test_an_unscoped_add_is_not_guessed
 test_proposals_wait_for_the_captain
