@@ -22,7 +22,7 @@ runs at every session start; it is silent unless something is wrong.
 ## Run
 
 ```sh
-cd foreman
+cd foreman   # or whatever you cloned it as
 pi
 ```
 
