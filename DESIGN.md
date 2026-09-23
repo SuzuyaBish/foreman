@@ -459,14 +459,25 @@ which is a different axis. Reading the `[key]` prefix back instead of folding th
 event log a second time is deliberate: a second fold is how two views of one
 board start to disagree.
 
-The widget shows at most six lines: a row per active crew member with its report
-age, then open todo items in any slots left. Each state is coloured by its theme
-role (`warning`, `error`, `accent`, `success`, `dim`), so the chrome reads
-correctly in a light and a dark terminal, and a todo row carries `-` in the age
-column so it stays aligned under the crew. The same role mapping colours the
-status bits; the todo count stays muted. Ages follow the same rule as
-`foreman_age_human` in `bin/foreman-lib.sh`, so the widget and `/crew` never
-disagree about how old a report is.
+The widget shows at most six lines, one row per crew. A crew row carries the
+number and title of the todo item linked back to it, the crew's own state as the
+single status column, the report age, and the crew's last note as a short
+description of what it is actually doing. An item no active crew is linked to
+keeps its own row with its todo state. Folding the item into the crew's row is
+what keeps one piece of work from wearing two words: `working` and `active` are
+the same moment seen from the crew and from the board, and the row says it once.
+A crew settled at its prompt is shown as `idle`, read from the same
+`busy-state`/`busy-gen` records `crew_busy` reads; an unknown record falls back
+to the report state, and the status line's counts stay report states. Each state
+is coloured by its theme role (`warning`, `error`, `accent`, `success`, `dim`),
+so the chrome reads correctly in a light and a dark terminal, and the same role
+mapping colours the status bits while the todo count stays muted. Every column
+has a fixed share and is clipped, so a row cannot wrap; the crew id stays whole
+as the description's prefix, because it is how a crew is addressed. Ages follow
+the same rule as `foreman_age_human` in `bin/foreman-lib.sh`, so the widget and
+`/crew` never disagree about how old a report is. `/crew`'s argument completions
+read the same grammar table its handler dispatches, so the palette and the
+command cannot drift.
 
 Session start also injects one line of context — `crew digest: <fleet> ·
 <decisions> · <wakes> · <todo counts>` — built by `crew-digest.sh` from the same

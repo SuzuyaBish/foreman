@@ -908,6 +908,21 @@ interface CrewRow {
 	state: string;
 	at: string;
 	note: string;
+	busy: string;
+}
+
+/**
+ * One rendered widget row. A crew and the todo item linked to it are folded
+ * into a single row, so a row's number/title may come from the item while its
+ * state/age/description come from the crew.
+ */
+interface ChromeRow {
+	number: string;
+	title: string;
+	state: string;
+	age: string;
+	note: string;
+	crew: string;
 }
 
 const ACTIVE_STATES = new Set(["queued", "working", "review", "blocked", "failed", "lost"]);
@@ -931,8 +946,16 @@ const STATE_RANK = new Map(STATE_ORDER.map((state, i) => [state, i]));
  */
 const WIDGET_WIDTH = 80;
 
-/** Visible columns ahead of a row's variable text: id(16) + state(8) + age(4) + spaces. */
-const ROW_PREFIX = 16 + 1 + 8 + 1 + 4 + 1;
+/**
+ * Column widths for one row, in the captain's order: number, dash, title,
+ * state, age, description. Every variable column has a fixed share and is
+ * clipped, so the row can never wrap; the description takes what is left.
+ */
+const COL_NUM = 5;
+const COL_TITLE = 25;
+const COL_STATUS = 8;
+const COL_AGE = 4;
+const COL_DESC = WIDGET_WIDTH - (COL_NUM + 1 + 1 + 1 + COL_TITLE + 1 + COL_STATUS + 1 + COL_AGE + 1);
 
 /** Theme roles, so the chrome reads correctly in a light and a dark terminal. */
 const STATE_COLOR: Record<string, "warning" | "error" | "accent" | "success" | "dim"> = {
@@ -941,7 +964,10 @@ const STATE_COLOR: Record<string, "warning" | "error" | "accent" | "success" | "
 	lost: "error",
 	review: "accent",
 	working: "success",
+	idle: "dim",
 	queued: "dim",
+	active: "accent",
+	open: "dim",
 };
 
 /**
@@ -982,19 +1008,58 @@ function readBoard(): CrewRow[] {
 	}
 	const rows: CrewRow[] = [];
 	for (const id of names) {
+		const dir = path.join(TASKS, id);
 		try {
-			const raw = fs.readFileSync(path.join(TASKS, id, "status"), "utf8");
+			const raw = fs.readFileSync(path.join(dir, "status"), "utf8");
 			rows.push({
 				id,
 				state: /^state=(.*)$/m.exec(raw)?.[1] ?? "unknown",
 				at: /^at=(.*)$/m.exec(raw)?.[1] ?? "",
 				note: /^note=(.*)$/m.exec(raw)?.[1] ?? "",
+				busy: readBusy(dir),
 			});
 		} catch {
 			/* a task without a status yet is not worth rendering */
 		}
 	}
 	return rows;
+}
+
+/**
+ * The crew's own semantic turn state, read straight off disk. `crew_busy`
+ * derives the same answer from `busy-state` + `busy-gen`, and the chrome reads
+ * the two files rather than forking a shell, because it renders every 15s. A
+ * record whose generation token does not match the armed sidecar is a stale
+ * incarnation and reads `unknown`, never `idle`.
+ */
+function readBusy(dir: string): string {
+	try {
+		const gen = fs.readFileSync(path.join(dir, "busy-gen"), "utf8").trim();
+		const record = fs.readFileSync(path.join(dir, "busy-state"), "utf8").split("\n")[0] ?? "";
+		if (!gen || !record) return "unknown";
+		let state = "unknown";
+		let token = "";
+		for (const field of record.split(/\s+/)) {
+			if (field.startsWith("state=")) state = field.slice(6);
+			else if (field.startsWith("gen=")) token = field.slice(4);
+		}
+		if (state !== "busy" && state !== "idle") return "unknown";
+		return token === gen ? state : "unknown";
+	} catch {
+		return "unknown";
+	}
+}
+
+/**
+ * A crew whose report says `working` but whose own busy record says it has
+ * settled at its prompt is not working, and the widget says `idle` instead.
+ * Unknown - no record, or one from a stale incarnation - falls back to the
+ * report state, because `unknown` is never a claim of idleness. The status
+ * line still counts the report state; this is the row being sharper, not the
+ * count changing.
+ */
+function displayState(crew: CrewRow): string {
+	return crew.state === "working" && crew.busy === "idle" ? "idle" : crew.state;
 }
 
 interface TodoRow {
@@ -1142,39 +1207,82 @@ function updateChrome(ctx: ExtensionContext) {
 		ctx.ui.setWidget("foreman", undefined);
 		return;
 	}
-	const crewShown = rows
-		.filter((r) => ACTIVE_STATES.has(r.state))
-		.sort((a, b) => rankOf(a) - rankOf(b) || a.id.localeCompare(b.id));
-	// Relevance, the rule that keeps the two views from disagreeing. The status
-	// line counts crews by state; the widget has to be able to show the work
-	// behind those counts. So the six-line budget goes: crew rows first,
-	// worst-first; then the not-done items those crews are linked to (the crew
-	// id lives in the todo row's `crew` field) — the work in flight; then the
-	// rest of the queue in file order. An item a counted crew is linked to
-	// therefore never loses its line to an older queued item, so the `active`
-	// row the captain expects from `N working` is always on the board.
-	const linked = new Set(crewShown.map((r) => r.id));
+	// One row per crew. The status line counts crews by report state and the
+	// board counts items by intent; the widget is the one place they are shown
+	// together, so the merge happens here. A crew row takes its number and
+	// title from the item that links back to it (the crew id lives in the todo
+	// row's `crew` field), and that item is then spent: it never also renders
+	// as a todo row, so one piece of work can no longer wear `working` and
+	// `active` in the same moment. A todo item with no active crew keeps a row
+	// of its own, and a crew with no linked item keeps a row too - never
+	// silent, never both.
+	//
+	// Ordering is worst-first: crews by report state, then the leftover queue
+	// in file order. A linked item is part of its crew's row, so it can never
+	// be crowded out by an older queued one.
+	//
 	// Proposals are absent from `todo` by construction (see the top of
 	// updateChrome), so no suggestion can ever take a line from the captain's
 	// board. The widget is the captain's alone; the `N proposed` count on the
 	// status line is the only place one shows.
+	const crewShown = rows
+		.filter((r) => ACTIVE_STATES.has(r.state))
+		.sort((a, b) => rankOf(a) - rankOf(b) || a.id.localeCompare(b.id));
 	const queued = todo.filter((t) => t.status !== "done");
-	const todoShown = [
-		...queued.filter((t) => t.crew && linked.has(t.crew)),
-		...queued.filter((t) => !(t.crew && linked.has(t.crew))),
-	];
-
-	const lines = crewShown.slice(0, 6).map((r) => {
-		const state = fg(STATE_COLOR[r.state] ?? "muted", clip(r.state, 8).padEnd(8));
-		const tail = `${ageOf(r.at).padEnd(4)} ${clip(r.note, WIDGET_WIDTH - ROW_PREFIX)}`.trimEnd();
-		return `${clip(r.id, 16).padEnd(16)} ${state} ${fg("muted", tail)}`.trimEnd();
-	});
-	for (const item of todoShown.slice(0, Math.max(0, 6 - lines.length))) {
-		const state = fg(item.status === "active" ? "accent" : "dim", clip(item.status, 8).padEnd(8));
-		// `-` in the age column keeps a todo row aligned under the crew rows.
-		const tail = `${"-".padEnd(4)} ${clip(item.text, WIDGET_WIDTH - ROW_PREFIX)}`;
-		lines.push(`${clip(`#${item.seq}`, 16).padEnd(16)} ${state} ${fg("muted", tail)}`.trimEnd());
+	const itemOfCrew = new Map<string, TodoRow>();
+	for (const item of queued) {
+		if (item.crew && item.crew !== "-" && !itemOfCrew.has(item.crew)) itemOfCrew.set(item.crew, item);
 	}
+	const spent = new Set<string>();
+	const chromeRows: ChromeRow[] = crewShown.map((crew) => {
+		const item = itemOfCrew.get(crew.id);
+		if (item) spent.add(item.seq);
+		return {
+			number: item ? `#${item.seq}` : "-",
+			title: item ? item.text : "(no todo item)",
+			state: displayState(crew),
+			age: ageOf(crew.at),
+			// The description is the new information: what the crew last said it
+			// was doing. No note is stated, never an empty column.
+			note: crew.note || "(no note yet)",
+			crew: crew.id,
+		};
+	});
+	const activeIds = new Set(crewShown.map((c) => c.id));
+	for (const item of queued) {
+		if (spent.has(item.seq)) continue;
+		const crew = item.crew && item.crew !== "-" ? item.crew : "";
+		// A row states why no crew state is shown on it, rather than leaving
+		// the status column ambiguous.
+		const note = !crew ? "(no crew yet)" : activeIds.has(crew) ? "(crew already listed)" : "(no active crew)";
+		chromeRows.push({
+			number: `#${item.seq}`,
+			title: item.text,
+			// No crew in flight: the item's own intent is the only status there is.
+			state: item.status,
+			age: "-",
+			note,
+			crew,
+		});
+	}
+
+	const lines = chromeRows.slice(0, 6).map((row) => {
+		const state = fg(STATE_COLOR[row.state] ?? "muted", clip(row.state, COL_STATUS).padEnd(COL_STATUS));
+		// The crew id stays visible, compact, as the description's prefix: it is
+		// how the captain addresses a crew, and a clipped description keeps the
+		// id rather than losing it.
+		const desc = clip(`${row.crew ? `${row.crew} ` : ""}${row.note}`, COL_DESC);
+		const tail = `${row.age.padEnd(COL_AGE)} ${desc}`.trimEnd();
+		return [
+			clip(row.number, COL_NUM).padEnd(COL_NUM),
+			"-",
+			clip(row.title, COL_TITLE).padEnd(COL_TITLE),
+			state,
+			fg("muted", tail),
+		]
+			.join(" ")
+			.trimEnd();
+	});
 	ctx.ui.setWidget("foreman", lines.length ? lines : undefined);
 }
 
@@ -1316,27 +1424,85 @@ export default function foreman(pi: ExtensionAPI) {
 		pi.registerTool(calmTool(tool));
 	}
 
+	// The real `/crew` grammar, in one table the handler and the argument
+	// completions both read, so the two can never disagree. `describe` is read at
+	// completion time, so the calm entry says what it will do from where calm
+	// mode stands now. Nothing here forks a shell: it is a UI list.
+	const crewArgs = (): { value: string; describe: () => string; run: (ctx: ExtensionContext) => Promise<void> }[] => [
+		{
+			value: "on",
+			describe: () => "show the crew widget",
+			run: async (ctx) => {
+				await run("crew-config.sh", ["set", "crewWidget", "true"], 500);
+				updateChrome(ctx);
+				ctx.ui.notify("crew widget on", "info");
+			},
+		},
+		{
+			value: "off",
+			describe: () => "hide the crew widget",
+			run: async (ctx) => {
+				await run("crew-config.sh", ["set", "crewWidget", "false"], 500);
+				updateChrome(ctx);
+				ctx.ui.notify("crew widget off", "info");
+			},
+		},
+		{
+			value: "calm",
+			describe: () => (calmEnabled ? "turn calm mode off" : "turn calm mode on"),
+			run: async (ctx) => {
+				const next = !calmEnabled;
+				await run("crew-config.sh", ["set", "crewCalm", next ? "true" : "false"], 500);
+				calmEnabled = next;
+				updateChrome(ctx);
+				ctx.ui.notify(`calm mode ${next ? "on" : "off"}`, "info");
+			},
+		},
+		{
+			value: "calm on",
+			describe: () => "turn calm mode on",
+			run: async (ctx) => {
+				await run("crew-config.sh", ["set", "crewCalm", "true"], 500);
+				calmEnabled = true;
+				updateChrome(ctx);
+				ctx.ui.notify("calm mode on", "info");
+			},
+		},
+		{
+			value: "calm off",
+			describe: () => "turn calm mode off",
+			run: async (ctx) => {
+				await run("crew-config.sh", ["set", "crewCalm", "false"], 500);
+				calmEnabled = false;
+				updateChrome(ctx);
+				ctx.ui.notify("calm mode off", "info");
+			},
+		},
+	];
+
 	pi.registerCommand("crew", {
 		description:
 			"Show the crew board and todo list; /crew on|off toggles the widget; " +
 			"/crew calm on|off toggles calm mode",
 		handler: async (args, ctx) => {
-			const arg = (args ?? "").trim().toLowerCase();
-			if (arg === "on" || arg === "off") {
-				await run("crew-config.sh", ["set", "crewWidget", arg === "on" ? "true" : "false"], 500);
-				updateChrome(ctx);
-				ctx.ui.notify(`crew widget ${arg}`, "info");
-				return;
-			}
-			if (arg === "calm" || arg === "calm on" || arg === "calm off") {
-				const next = arg === "calm" ? !calmEnabled : arg === "calm on";
-				await run("crew-config.sh", ["set", "crewCalm", next ? "true" : "false"], 500);
-				calmEnabled = next;
-				updateChrome(ctx);
-				ctx.ui.notify(`calm mode ${next ? "on" : "off"}`, "info");
+			const arg = (args ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+			const entry = crewArgs().find((a) => a.value === arg);
+			if (entry) {
+				await entry.run(ctx);
 				return;
 			}
 			ctx.ui.notify(await run("crew-list.sh", [], 6000), "info");
+		},
+		// Filter the table on the prefix, so a family shows only as it is typed.
+		// `calm ` (with the space) matches none of the bare entries but both of its
+		// refinements. A prefix that matches nothing returns null, which is how pi
+		// is told to keep its own behaviour rather than show an empty menu.
+		getArgumentCompletions: (prefix) => {
+			const p = (prefix ?? "").toLowerCase();
+			const items = crewArgs()
+				.filter((a) => a.value.startsWith(p))
+				.map((a) => ({ value: a.value, label: a.value, description: a.describe() }));
+			return items.length ? items : null;
 		},
 	});
 
