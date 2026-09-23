@@ -3,8 +3,8 @@
 #
 # The chrome is TypeScript inside the extension, so this imports the real file
 # under node with a fake UI and a fake theme and asserts the exact lines it
-# renders. The two pi packages the extension imports are stubbed, which keeps
-# this hermetic: no model, no Herdr, no captain state.
+# renders. The pi packages the extension imports are stubbed, which keeps this
+# hermetic: no model, no Herdr, no captain state.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -33,6 +33,36 @@ cat >"$ROOTDIR/node_modules/@earendil-works/pi-coding-agent/package.json" <<'JSO
 JSON
 cat >"$ROOTDIR/node_modules/@earendil-works/pi-coding-agent/index.js" <<'JS'
 export const defineTool = (tool) => tool;
+// The built-in tool definitions the extension re-registers to hide their calls.
+// Each carries its own renderers, and like the real ones they reuse
+// `context.lastComponent` for streaming updates - calling setText on it. That is
+// exactly the contract the calm wrapper has to respect.
+const builtin = (name) => () => ({
+  name,
+  label: name,
+  description: name,
+  parameters: {},
+  async execute() {
+    return { content: [{ type: "text", text: name + " out" }], details: undefined };
+  },
+  renderCall(_args, _theme, context) {
+    const text = context.lastComponent ?? { render: () => [name + " call"], setText() {}, invalidate() {} };
+    text.setText(name + " call");
+    return text;
+  },
+  renderResult(_result, _options, _theme, context) {
+    const text = context.lastComponent ?? { render: () => [name + " result"], setText() {}, invalidate() {} };
+    text.setText(name + " result");
+    return text;
+  },
+});
+export const createReadToolDefinition = builtin("read");
+export const createBashToolDefinition = builtin("bash");
+export const createEditToolDefinition = builtin("edit");
+export const createWriteToolDefinition = builtin("write");
+export const createFindToolDefinition = builtin("find");
+export const createGrepToolDefinition = builtin("grep");
+export const createLsToolDefinition = builtin("ls");
 JS
 
 HARNESS="$ROOTDIR/chrome.mjs"
@@ -42,13 +72,13 @@ import * as path from "node:path";
 
 const [, , extPath, home] = process.argv;
 process.env.FOREMAN_HOME = home;
-const mod = await import(extPath);
 
 const status = [];
 const widget = [];
 // A fake theme tags what it was asked to colour, so a test can assert the role.
 const theme = {
 	fg: (color, text) => `[[${color}]]${text}[[/${color}]]`,
+	bg: (color, text) => `[[${color}]]${text}[[/${color}]]`,
 	bold: (text) => `[[bold]]${text}[[/bold]]`,
 	italic: (text) => text,
 	underline: (text) => text,
@@ -61,26 +91,93 @@ const ui = {
 	notify: () => {},
 	theme,
 };
-const ctx = { hasUI: true, ui };
-const handlers = {};
-mod.default({
-	on: (event, handler) => {
-		handlers[event] = handler;
-	},
-	registerTool: () => {},
-	registerCommand: () => {},
-	sendMessage: () => {},
-	sendUserMessage: () => {},
-});
+const ctx = { hasUI: true, ui, mode: "tui" };
+const last = (list) => list[list.length - 1];
+
+function load(ext) {
+	const handlers = {};
+	const tools = {};
+	const commands = {};
+	const pi = {
+		on: (event, handler) => {
+			handlers[event] = handler;
+		},
+		registerTool: (tool) => {
+			tools[tool.name] = tool;
+		},
+		registerCommand: (name, options) => {
+			commands[name] = options;
+		},
+		sendMessage: () => {},
+		sendUserMessage: () => {},
+	};
+	return import(ext).then(async (mod) => {
+		await mod.default(pi);
+		return { handlers, tools, commands, pi };
+	});
+}
+
+const first = await load(extPath);
+const { handlers, tools, commands } = first;
 
 // A finished tool result is the cheap, script-free path that refreshes the
 // chrome; session_start would also start the watcher and a timer.
 await handlers.tool_execution_end({}, ctx);
-const last = (list) => list[list.length - 1];
 process.stdout.write(`STATUS|${last(status) ?? ""}\n`);
 const shown = last(widget);
 if (shown === undefined) process.stdout.write("WIDGET|(none)\n");
 else for (const line of shown) process.stdout.write(`WIDGET|${line}\n`);
+
+// --- calm mode -------------------------------------------------------------
+// The call renderer is synchronous; renderCall returns a component and the
+// count of lines it draws is what "hidden" means. 0 is hidden.
+const rctx = { isPartial: false, isError: false, state: {} };
+const callLines = (tool, args) => {
+	const component = tool.renderCall(args, theme, rctx);
+	return component ? component.render(80).length : -1;
+};
+const resultLines = (tool) => {
+	const component = tool.renderResult(
+		{ content: [{ type: "text", text: "hello\nworld" }], details: undefined },
+		{ expanded: false, isPartial: false },
+		theme,
+		rctx,
+	);
+	return component ? component.render(80).length : -1;
+};
+
+const statusBefore = last(status);
+const widgetBefore = last(widget);
+process.stdout.write(`CALM_CUSTOM_OFF|${callLines(tools.crew_list, { action: "list" })}\n`);
+process.stdout.write(`CALM_RESULT_OFF|${resultLines(tools.crew_list)}\n`);
+process.stdout.write(`CALM_BUILTIN_OFF|${callLines(tools.read, { path: "x" })}\n`);
+// The real ToolExecutionComponent hands the component renderCall returned back in
+// as `lastComponent` on the next render. The built-in renderers call setText on
+// it, so the calm wrapper must not forward its own component as their Text.
+const reuse = () => {
+	const first = tools.read.renderCall({ path: "x" }, theme, { ...rctx, lastComponent: undefined });
+	const second = tools.read.renderCall({ path: "x" }, theme, { ...rctx, lastComponent: first });
+	return second.render(80).length;
+};
+process.stdout.write(`CALM_BUILTIN_REUSE|${reuse()}\n`);
+
+await commands.crew.handler("calm on", ctx);
+process.stdout.write(`CONFIG|${fs.readFileSync(path.join(home, "config.json"), "utf8")}\n`);
+process.stdout.write(`CALM_CUSTOM_ON|${callLines(tools.crew_list, { action: "list" })}\n`);
+process.stdout.write(`CALM_RESULT_ON|${resultLines(tools.crew_list)}\n`);
+process.stdout.write(`CALM_BUILTIN_ON|${callLines(tools.read, { path: "x" })}\n`);
+const same = last(status) === statusBefore && JSON.stringify(last(widget)) === JSON.stringify(widgetBefore);
+process.stdout.write(`CALM_CHROME|${same ? "same" : "changed"}\n`);
+
+// A second look at the same row proves the toggle is live, not baked in at run time.
+await commands.crew.handler("calm off", ctx);
+process.stdout.write(`CALM_CUSTOM_AGAIN|${callLines(tools.crew_list, { action: "list" })}\n`);
+
+// Reload: a fresh module instance reads the persisted setting off disk. This is
+// how the choice survives a restart, and it is the whole point of the config key.
+await commands.crew.handler("calm on", ctx);
+const second = await load(extPath + "?reload=1");
+process.stdout.write(`CALM_RELOAD|${callLines(second.tools.crew_list, { action: "list" })}\n`);
 
 // The captain can turn the widget off; the status line stays.
 fs.writeFileSync(path.join(home, "config.json"), '{"crewWidget":false}');
@@ -198,8 +295,47 @@ test_the_chrome_is_scoped_to_the_project_in_focus() {
   pass "the chrome reads the project in focus and never another project's backlog"
 }
 
+test_calm_mode_hides_the_foremans_tool_calls() {
+  local off again
+  off=$(field CALM_CUSTOM_OFF)
+  again=$(field CALM_CUSTOM_AGAIN)
+
+  # The setting is first-class and persisted, the same way crewWidget is.
+  assert_contains "$OUT" '"crewCalm": true' "/crew calm on writes the crewCalm setting"
+
+  # Calm off, a call and its result draw the block they always did.
+  assert_not_contains "$OUT" "CALM_CUSTOM_OFF|0" "a custom tool call draws when calm is off"
+  assert_not_contains "$OUT" "CALM_RESULT_OFF|0" "a tool result draws when calm is off"
+  [ "$off" = "$again" ] || fail "turning calm off must restore the tool's normal rendering ($off vs $again)"
+
+  # Calm on, the same rows render zero lines: hidden, not an empty box.
+  assert_contains "$OUT" "CALM_CUSTOM_ON|0" "a custom tool call is hidden when calm is on"
+  assert_contains "$OUT" "CALM_RESULT_ON|0" "a tool result is hidden when calm is on"
+
+  # pi's built-in tools are re-registered from their own definitions, so their
+  # calls calm too, without changing what they do.
+  assert_not_contains "$OUT" "CALM_BUILTIN_OFF|0" "a built-in tool call draws when calm is off"
+  assert_contains "$OUT" "CALM_BUILTIN_ON|0" "a built-in tool call is hidden when calm is on"
+  # The built-in renderers reuse lastComponent; the wrapper must survive that.
+  assert_not_contains "$OUT" "CALM_BUILTIN_REUSE|0" "a built-in call re-renders when its component is reused"
+
+  # The renderers read the live flag, so the toggle redraws rows already on screen.
+  assert_not_contains "$OUT" "CALM_CUSTOM_AGAIN|0" "the toggle is live, not baked in at run time"
+
+  # And it survives a reload because the choice lives in config.json.
+  assert_contains "$OUT" "CALM_RELOAD|0" "the calm choice survives a reload"
+
+  # It quiets the tool call chrome and nothing else: no status, no widget change.
+  assert_contains "$OUT" "CALM_CHROME|same" "calm mode leaves the status line and the widget alone"
+  pass "calm mode hides the foreman's tool calls, is live and persists"
+}
+
 line_of() { # <text> <needle> -> 1-based line number
   printf '%s\n' "$1" | grep -n -F -e "$2" | head -1 | cut -d: -f1
+}
+
+field() { # <NAME> -> the value printed as `NAME|value`
+  printf '%s\n' "$OUT" | sed -n "s/^$1|//p" | head -1
 }
 
 # The captain saw the line say `2 working` while the widget showed a single
@@ -269,6 +405,7 @@ test_an_enormous_item_is_truncated_and_keeps_the_budget() {
 test_the_status_line_leads_with_what_is_owed
 test_the_widget_ranks_and_tiers_the_crew
 test_the_widget_can_be_turned_off
+test_calm_mode_hides_the_foremans_tool_calls
 test_the_chrome_is_scoped_to_the_project_in_focus
 test_the_widget_keeps_the_in_flight_item_ahead_of_older_queued_ones
 test_an_enormous_item_is_truncated_and_keeps_the_budget

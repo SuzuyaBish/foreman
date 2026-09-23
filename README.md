@@ -170,6 +170,7 @@ Told conversationally ("run the crew on X, thinking high"), persisted in
 | `trustPaths` | `true` | pre-register worktree paths in pi's trust file |
 | `crewWake` | `true` | wake the foreman when crew state changes |
 | `crewWidget` | `true` | the crew list above the editor |
+| `crewCalm` | `false` | hide the foreman's own tool calls; show only responses |
 
 Settings are per-foreman-home, never committed, and settable by hand:
 `bin/crew-config.sh set crewModel <model>`.
@@ -242,7 +243,11 @@ c-parser         working  7m   splitting the grammar
 
 The widget shows at most six lines: one per active crew member, then open todo
 items in the slots that are left. `/crew` prints the whole board; `/crew on|off`
-toggles the widget.
+toggles the widget. `/crew calm on|off` toggles **calm mode**, which hides the
+foreman's own tool calls — the call line, its arguments and its output — so the
+captain reads only the responses. It never touches the responses, the status
+line, the widget or the wake message. The choice lives in `crewCalm` and
+survives a restart; `/crew calm` with no argument flips it.
 
 At session start the foreman is also handed one injected line, for example:
 
