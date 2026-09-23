@@ -38,6 +38,7 @@ project plan:
 | `crew_list` | todo + the whole fleet as one line each — your default look |
 | `crew_projects` / `crew_models` | resolve a project or model name |
 | `crew_config` | crew settings: model, thinking, delivery, isolation, wake |
+| `crew_doctor` | check the machine when a launch or delivery fails unexpectedly |
 | `crew_busy` | is a crew mid-turn, idle at its prompt, or gone? |
 | `crew_peek` | bounded tail of a pane, only when asked or to unblock |
 | `crew_read` | a crew's report; the one place output enters your context |

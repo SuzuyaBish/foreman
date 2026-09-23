@@ -376,6 +376,19 @@ const crewWakeDrain = one(
 	(p) => (p.ack === undefined ? ["list"] : ["ack", String(p.ack)]),
 );
 
+// --- machine check ---------------------------------------------------------
+
+const crewDoctor = one(
+	"crew_doctor",
+	"Check the machine",
+	"Check this machine before work starts: the Herdr server, jq, git, pi, gh auth, " +
+		"and the optional tools. Run it when launches or deliveries fail unexpectedly, " +
+		"or when the captain asks whether the setup is healthy.",
+	Type.Object({}),
+	"crew-doctor.sh",
+	() => [],
+);
+
 // --- Lavish ----------------------------------------------------------------
 
 const lavishOpen = one(
@@ -623,6 +636,7 @@ export default function foreman(pi: ExtensionAPI) {
 		crewArchive,
 		crewRecover,
 		crewWakeDrain,
+		crewDoctor,
 		lavishOpen,
 		lavishPoll,
 	]) {
@@ -653,6 +667,14 @@ export default function foreman(pi: ExtensionAPI) {
 			await run("crew-todo.sh", ["sync"], 200);
 		} catch {
 			/* recovery is best effort; the board still renders */
+		}
+		// Say once, briefly, if the machine is missing something the session needs;
+		// the doctor is silent when it is healthy.
+		try {
+			const report = await run("crew-doctor.sh", ["--quiet"], 2000);
+			if (!report.startsWith("crew-doctor: ok")) ctx.ui.notify(report, "warning");
+		} catch (error) {
+			ctx.ui.notify(`crew-doctor: ${String(error)}`, "warning");
 		}
 		updateChrome(ctx);
 		startWatcher(pi);

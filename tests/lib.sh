@@ -207,6 +207,14 @@ next_id() {
 }
 
 case "$cmd" in
+status)
+  running=true
+  [ -f "$state/server-down" ] && running=false
+  stale=false
+  [ -f "$state/server-stale" ] && stale=true
+  jq -cn --argjson r "$running" --argjson s "$stale" \
+    '{client:{version:"stub-0.9.1"},server:{running:$r,status:(if $r then "running" else "stopped" end),version:"stub-0.9.1",server_binary_stale:$s,compatible:true}}'
+  ;;
 workspace)
   sub=${1:-}
   shift || true
@@ -365,6 +373,11 @@ state=${GH_STUB_STATE:?gh stub: GH_STUB_STATE unset}
 printf '%s\n' "$*" >>"$state/calls"
 cmd=${1:-}
 shift || true
+if [ "$cmd" = auth ]; then
+  [ -f "$state/auth-fail" ] && exit 1
+  printf 'Logged in to github.com account test\n'
+  exit 0
+fi
 case "$cmd" in
 pr)
   sub=${1:-}

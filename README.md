@@ -16,6 +16,9 @@ Read [DESIGN.md](DESIGN.md) for the context contract. It is the point.
 - `herdr` on PATH, server running (`herdr status`)
 - `jq`
 
+`bin/crew-doctor.sh` checks all of this (and the optional `gh`/`lavish-axi`) and
+runs at every session start; it is silent unless something is wrong.
+
 ## Run
 
 ```sh
@@ -186,6 +189,7 @@ production code path.
 | `bin/crew-merge.sh <id>` | merge a crew PR on your say-so |
 | `bin/crew-pr.sh` / `bin/crew-pr-check.sh` | record / poll a pull request |
 | `bin/crew-projects.sh` / `bin/crew-models.sh` | resolve names |
+| `bin/crew-doctor.sh [--quiet]` | check the machine before a session |
 | `bin/crew-config.sh` | show / set crew settings |
 | `bin/crew-worktree.sh add\|remove` | the git worktree mechanics |
 | `bin/crew-trust.sh <path>` | pi folder trust for a path |
