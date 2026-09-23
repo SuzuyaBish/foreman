@@ -58,6 +58,7 @@ foreman/
                          this directory; trust the project once per clone.
   bin/foreman            convenience: create the project dirs, then start pi
   bin/*.sh               zero-token mechanics
+  bin/herdr-workspace-move.mjs  the one socket call `herdr workspace` lacks
   bin/crew-test.sh       runs the behaviour suite
   tests/<subject>.test.sh  one file per subject; fake herdr/gh/pi
   projects/              the captain's repositories (gitignored)
@@ -222,6 +223,37 @@ feedback, so both tools replace the `dom_snapshot:` line with a marker and cap
 the remainder at the same ~4 KB ceiling every other result obeys. The live round
 trip is covered by an opt-in test rather than the hermetic suite, because it needs
 a real server.
+
+## How a crew member appears
+
+Herdr has no parent/child relationship for panes or agents: `agent list` carries
+`parent_pane_id`, `parent_agent_id` and `depth`, but nothing can set them and no
+CLI or socket method exposes one. So the hierarchy is built from the two things
+Herdr does model:
+
+- **A workspace per crew member.** The launch runs
+  `herdr workspace create --cwd <worktree> --label "└ <id>" --no-focus` and
+  renames the seeded tab to `crew-<id>`. The child glyph in the label is the
+  whole visual claim.
+- **Position.** The workspace is then moved directly after the foreman's own,
+  past any sibling already in that block, so a crew's workspaces read as a
+  contiguous child block. `workspace.move` exists only on Herdr's control
+  socket, which is the entire reason `bin/herdr-workspace-move.mjs` exists: one
+  narrowly scoped request, nothing else.
+
+The relationship itself is ours, not Herdr's. Each task records `workspace` and
+`parent_workspace`, and the position is computed from those records — never from
+label patterns, which would be a second source of truth for the same fact.
+
+It is presentation only, and it always degrades. If the parent cannot be
+identified, the mover is missing, or Herdr refuses the move, the launch warns on
+stderr and the crew stays where Herdr put it — running. A Herdr that cannot
+create a workspace at all gets the crew a plain tab in the foreman's workspace.
+
+A relaunch adopts the workspace the task already owns rather than creating a
+second one. And a task whose record predates this — it names the foreman's own
+workspace and has no parent — owns nothing: closing it closes its tab, never the
+captain's workspace.
 
 ## The chrome
 

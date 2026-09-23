@@ -45,14 +45,14 @@ if [ -z "$PANE" ]; then
   foreman_status_sync "$ID"
   retire_busy
   # A pane can vanish while its tab survives (a crashed agent, a killed shell),
-  # so a close still closes the tab this foreman created.
+  # so a close still closes the home this foreman created for the task.
   if [ "$MODE" = --close ]; then
-    TAB=$(foreman_meta_get "$ID" tab)
-    if [ -n "$TAB" ]; then
-      foreman_herdr tab close "$TAB" >/dev/null 2>&1 || true
-      printf 'stopped %s: its pane was already gone; its tab was closed\n' "$ID"
-      exit 0
-    fi
+    case "$(foreman_close_home "$ID")" in
+    workspace) printf 'stopped %s: its pane was already gone; its workspace was closed\n' "$ID" ;;
+    tab) printf 'stopped %s: its pane was already gone; its tab was closed\n' "$ID" ;;
+    *) printf 'stopped %s: the recorded pane is already gone\n' "$ID" ;;
+    esac
+    exit 0
   fi
   printf 'stopped %s: the recorded pane is already gone\n' "$ID"
   exit 0
@@ -85,9 +85,11 @@ case "$MODE" in
   foreman_status_sync "$ID"
   retire_busy
   if [ "$MODE" = "--close" ]; then
-    TAB=$(foreman_meta_get "$ID" tab)
-    [ -z "$TAB" ] || foreman_herdr tab close "$TAB" >/dev/null 2>&1 || true
-    printf 'exited %s (%s) and closed its tab\n' "$ID" "$confirmed"
+    case "$(foreman_close_home "$ID")" in
+    workspace) printf 'exited %s (%s) and closed its workspace\n' "$ID" "$confirmed" ;;
+    tab) printf 'exited %s (%s) and closed its tab\n' "$ID" "$confirmed" ;;
+    *) printf 'exited %s (%s); nothing was left to close\n' "$ID" "$confirmed" ;;
+    esac
   else
     printf 'exited %s (confirmed=%s); pane, cwd and files preserved\n' "$ID" "$confirmed"
   fi

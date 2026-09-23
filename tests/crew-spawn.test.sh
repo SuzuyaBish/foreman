@@ -16,6 +16,7 @@ fm_git_isolate
 
 SPAWN="$BIN/crew-spawn.sh"
 TASKDIR="$FOREMAN_HOME/tasks"
+meta_of() { sed -n "s/^$2=//p" "$TASKDIR/$1/meta" 2>/dev/null | head -1; }
 
 test_plain_directory_spawn() {
   local dir out
@@ -166,19 +167,28 @@ test_spawn_surfaces_uncommitted_checkout_work() {
 }
 
 test_workspace_resolution() {
-  local dir
+  local dir ws
   dir=$(fm_tmproot workspace)
   HERDR_WORKSPACE_ID=ws-ambient
   HERDR_SESSION=default
   export HERDR_WORKSPACE_ID HERDR_SESSION
+  fm_herdr_seed_workspace ws-ambient skills
+
+  # Each crew member gets its own workspace. Herdr has no parent/child relation
+  # to use, so the hierarchy *is* the child glyph in the label plus the move that
+  # puts the workspace directly after the foreman's own.
   "$SPAWN" ws-ambient-task "$dir" task >/dev/null
-  assert_contains "$(fm_herdr_calls)" "tab create --workspace ws-ambient" "an ambient workspace is reused"
+  assert_contains "$(fm_herdr_calls)" "workspace create" "the crew gets a workspace of its own"
+  assert_contains "$(fm_herdr_calls)" "--label └ ws-ambient-task" "the workspace is labelled as a child"
+  ws=$(meta_of ws-ambient-task workspace)
+  assert_equals "ws-ambient" "$(meta_of ws-ambient-task parent_workspace)" "the parent workspace is recorded"
+  assert_contains "$(fm_herdr_moves)" "$ws" "the new workspace is moved after its parent"
   unset HERDR_WORKSPACE_ID HERDR_SESSION
 
   "$SPAWN" ws-created-task "$dir" task >/dev/null
-  assert_contains "$(fm_herdr_calls)" "workspace create" "outside a workspace one is created"
-  assert_contains "$(fm_herdr_calls)" "--label foreman" "the created workspace is labelled for the foreman"
-  pass "crew land beside the captain, or in a dedicated workspace"
+  assert_contains "$(fm_herdr_calls)" "--label foreman" "outside a workspace the foreman gets a dedicated one"
+  assert_contains "$(meta_of ws-created-task parent_workspace)" "ws-" "that workspace becomes the parent"
+  pass "every crew member gets its own workspace, placed as a child of the foreman's"
 }
 
 test_plain_directory_spawn

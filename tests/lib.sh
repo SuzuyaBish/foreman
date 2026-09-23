@@ -111,7 +111,9 @@ fm_home() {
   PI_TRUST_FILE="$root/trust.json"
   mkdir -p "$FOREMAN_HOME" "$FOREMAN_PROJECTS" "$FOREMAN_WORKTREES"
   FOREMAN_SESSION=${FOREMAN_SESSION:-default}
-  unset HERDR_WORKSPACE_ID
+  # Herdr's ambient identity must never leak in: a test that inherits the
+  # captain's pane, tab or socket would take a different path than a bare shell.
+  unset HERDR_WORKSPACE_ID HERDR_SOCKET_PATH HERDR_TAB_ID HERDR_PANE_ID
   export FOREMAN_HOME FOREMAN_PROJECTS FOREMAN_WORKTREES FOREMAN_SESSION PI_TRUST_FILE
   printf '%s\n' "$FOREMAN_HOME"
 }
@@ -233,18 +235,43 @@ workspace)
     printf ']}}\n'
     ;;
   create)
-    label=
+    [ ! -f "$state/workspace-create-fail" ] || exit 1
+    label= cwd=
     while [ $# -gt 0 ]; do
       case "$1" in
       --label) label=$2; shift 2 ;;
-      --cwd) shift 2 ;;
+      --cwd) cwd=$2; shift 2 ;;
       --no-focus) shift ;;
       *) shift ;;
       esac
     done
     id=$(next_id ws)
+    tab=$(next_id tab)
+    pane=$(next_id pane)
+    printf 'tab=%s\ncwd=%s\nlabel=%s\n' "$tab" "$cwd" "$label" >"$state/pane-$pane"
+    printf '%s\n' "$pane" >>"$state/ws-$id"
     printf '%s\t%s\n' "$id" "${label:-}" >>"$state/workspaces"
+    # Herdr answers with the workspace, its seeded tab, and that tab's root pane.
+    jq -cn --arg i "$id" --arg t "$tab" --arg p "$pane" \
+      '{result:{workspace:{workspace_id:$i},tab:{tab_id:$t},root_pane:{pane_id:$p}}}'
+    ;;
+  get)
+    id=${1:-}
+    grep -q "^$id"$'\t' "$state/workspaces" 2>/dev/null || exit 1
     jq -cn --arg i "$id" '{result:{workspace:{workspace_id:$i}}}'
+    ;;
+  close)
+    id=${1:-}
+    grep -q "^$id"$'\t' "$state/workspaces" 2>/dev/null || exit 1
+    if [ -f "$state/ws-$id" ]; then
+      while IFS= read -r p; do
+        [ -n "$p" ] && rm -f "$state/pane-$p"
+      done <"$state/ws-$id"
+      rm -f "$state/ws-$id"
+    fi
+    grep -v "^$id"$'\t' "$state/workspaces" >"$state/workspaces.tmp" 2>/dev/null || :
+    mv "$state/workspaces.tmp" "$state/workspaces"
+    printf '{"result":{}}\n'
     ;;
   *) exit 1 ;;
   esac
@@ -268,6 +295,19 @@ tab)
     pane=$(next_id pane)
     printf 'tab=%s\ncwd=%s\nlabel=%s\n' "$tab" "$cwd" "$label" >"$state/pane-$pane"
     jq -cn --arg t "$tab" --arg p "$pane" '{result:{tab:{tab_id:$t},root_pane:{pane_id:$p}}}'
+    ;;
+  rename)
+    # <tab> <label>: the label of the seeded tab lives in its pane file.
+    t=${1:-}
+    label=${2:-}
+    for f in "$state"/pane-*; do
+      [ -f "$f" ] || continue
+      if [ "$(sed -n 's/^tab=//p' "$f")" = "$t" ]; then
+        cwd=$(sed -n 's/^cwd=//p' "$f")
+        printf 'tab=%s\ncwd=%s\nlabel=%s\n' "$t" "$cwd" "$label" >"$f"
+      fi
+    done
+    printf '{"result":{}}\n'
     ;;
   close)
     t=${1:-}
@@ -330,12 +370,53 @@ agent)
     exit 1
   fi
   ;;
+session)
+  sub=${1:-}
+  case "$sub" in
+  list)
+    jq -cn --arg s "$state/socket" \
+      '{sessions:[{name:"default",running:true,socket_path:$s}]}'
+    ;;
+  *) exit 1 ;;
+  esac
+  ;;
 *) exit 1 ;;
 esac
 SH
   chmod +x "$FM_FAKEBIN/herdr"
+  # The workspace mover is socket-only in Herdr, so the tests substitute the
+  # transport and watch the request instead of opening a socket.
+  cat >"$FM_FAKEBIN/herdr-mover" <<'SH'
+#!/usr/bin/env bash
+set -u
+state=${HERDR_STUB_STATE:?herdr mover stub: HERDR_STUB_STATE unset}
+[ ! -f "$state/mover-fail" ] || exit 1
+printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$state/moves"
+SH
+  chmod +x "$FM_FAKEBIN/herdr-mover"
+  FOREMAN_HERDR_MOVER="$FM_FAKEBIN/herdr-mover"
+  export FOREMAN_HERDR_MOVER
   printf '%s\n' "$state"
 }
+
+# fm_herdr_seed_workspace <id> <label>: a workspace that already exists before
+# the test starts, as the captain's own always does.
+fm_herdr_seed_workspace() {
+  printf '%s\t%s\n' "$1" "${2:-}" >>"$HERDR_STUB_STATE/workspaces"
+}
+
+# fm_herdr_moves: every workspace.move the launch asked for, "<socket>\t<ws>\t<index>".
+fm_herdr_moves() { cat "$HERDR_STUB_STATE/moves" 2>/dev/null || true; }
+
+# fm_herdr_mover_fail: make every move request fail, to prove the fallback.
+fm_herdr_mover_fail() { : >"$HERDR_STUB_STATE/mover-fail"; }
+
+# fm_herdr_workspace_create_fail: a Herdr that cannot give a crew a workspace, so
+# the launch has to fall back to the flat layout.
+fm_herdr_workspace_create_fail() { : >"$HERDR_STUB_STATE/workspace-create-fail"; }
+
+# fm_herdr_workspace_panes <id>: panes that live in a workspace.
+fm_herdr_workspace_panes() { cat "$HERDR_STUB_STATE/ws-$1" 2>/dev/null || true; }
 
 # fm_herdr_last_pane: the pane id of the most recently created tab.
 fm_herdr_last_pane() {

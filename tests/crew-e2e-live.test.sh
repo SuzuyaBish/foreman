@@ -141,7 +141,9 @@ test_a_real_crew_does_the_whole_trip() {
 
   # The work must be real git work, not a sentence claiming work happened.
   assert_present "$WT/GREETING.md" "the crew wrote its file"
-  assert_equals "hello from the crew" "$(head -1 "$WT/GREETING.md")" "the file has the asked-for line"
+  # A live model will punctuate the line; the ask is the phrase, not its
+  # exact bytes, and over-specifying that here only makes the file flaky.
+  assert_contains "$(head -1 "$WT/GREETING.md")" "hello from the crew" "the file has the asked-for line"
   assert_equals "$((BASE_N + 1))" "$(git -C "$WT" rev-list --count HEAD)" "there is exactly one new commit"
   assert_equals "GREETING.md" "$(git -C "$WT" show --pretty=format: --name-only HEAD | head -1)" \
     "the new commit is the crew's file"

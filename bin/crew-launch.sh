@@ -44,11 +44,46 @@ EXT="$DIR/pi-ext.ts"
 
 APPROVE=$(foreman_config_bool crewApprove 1)
 
-WS=$(foreman_workspace)
-OUT=$(foreman_herdr tab create --workspace "$WS" --cwd "$CWD" --label "crew-$ID" --no-focus 2>/dev/null) ||
-  foreman_die "herdr tab create failed in workspace $WS (session $FOREMAN_SESSION)"
-TAB=$(printf '%s' "$OUT" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
-PANE=$(printf '%s' "$OUT" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
+# --- where the crew appears -------------------------------------------------
+#
+# One workspace per crew member. That is what makes a crew read as a subordinate
+# of the foreman in Herdr's sidebar: Herdr has no parent/child relationship for
+# panes or agents, so the only levers are the workspace's label (a child glyph)
+# and its position (directly after the foreman's own workspace, past any sibling
+# already there). The relationship itself lives in our task records.
+#
+# A relaunch adopts the workspace the task already owns instead of creating a
+# second one, so recovery does not multiply workspaces.
+PARENT_WS=$(foreman_workspace)
+WS=$(foreman_own_workspace "$ID")
+NEW_WS=0
+OUT=
+
+if [ -n "$WS" ] && foreman_herdr workspace get "$WS" >/dev/null 2>&1; then
+  OUT=$(foreman_herdr tab create --workspace "$WS" --cwd "$CWD" --label "crew-$ID" --no-focus 2>/dev/null) ||
+    foreman_die "herdr could not add a tab to the crew's workspace $WS (session $FOREMAN_SESSION)"
+  TAB=$(printf '%s' "$OUT" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
+  PANE=$(printf '%s' "$OUT" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
+else
+  OUT=$(foreman_herdr workspace create --cwd "$CWD" --label "└ $ID" --no-focus 2>/dev/null) || OUT=
+  WS=$(printf '%s' "$OUT" | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
+  TAB=$(printf '%s' "$OUT" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
+  PANE=$(printf '%s' "$OUT" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
+  if [ -n "$WS" ] && [ -n "$TAB" ]; then
+    NEW_WS=1
+    # The seeded tab is called "1"; inside its own workspace it should still say
+    # whose it is.
+    foreman_herdr tab rename "$TAB" "crew-$ID" >/dev/null 2>&1 || true
+  else
+    # A Herdr that cannot give the crew its own workspace still gets the crew:
+    # fall back to the flat layout rather than losing the launch.
+    WS=$PARENT_WS
+    OUT=$(foreman_herdr tab create --workspace "$WS" --cwd "$CWD" --label "crew-$ID" --no-focus 2>/dev/null) ||
+      foreman_die "herdr could not give the crew a workspace or a tab (session $FOREMAN_SESSION)"
+    TAB=$(printf '%s' "$OUT" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
+    PANE=$(printf '%s' "$OUT" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
+  fi
+fi
 if [ -z "$TAB" ] || [ -z "$PANE" ]; then
   foreman_die "herdr returned no tab/pane id: $OUT"
 fi
@@ -56,8 +91,21 @@ fi
 foreman_meta_set "$ID" pane "$FOREMAN_SESSION:$PANE"
 foreman_meta_set "$ID" tab "$TAB"
 foreman_meta_set "$ID" workspace "$WS"
+foreman_meta_set "$ID" parent_workspace "$PARENT_WS"
 foreman_meta_set "$ID" session "$FOREMAN_SESSION"
 foreman_meta_set "$ID" cwd "$CWD"
+
+# Presentation only, and best effort: if the position cannot be worked out, the
+# mover is absent, or Herdr refuses the move, the crew stays where Herdr put it
+# and the launch is still good.
+if [ "$NEW_WS" = 1 ] && [ -n "$PARENT_WS" ] && [ "$PARENT_WS" != "$WS" ]; then
+  if IDX=$(foreman_workspace_order_index "$PARENT_WS" "$WS"); then
+    foreman_herdr_move "$WS" "$IDX" ||
+      printf 'warning: %s stays where Herdr put it; the workspace could not be moved after %s\n' "$WS" "$PARENT_WS" >&2
+  else
+    printf 'warning: %s stays where Herdr put it; the workspace could not be placed after %s\n' "$WS" "$PARENT_WS" >&2
+  fi
+fi
 
 # Pre-register folder trust so neither the crew nor a human who attaches later
 # is prompted. Best effort: never fail a launch over it.

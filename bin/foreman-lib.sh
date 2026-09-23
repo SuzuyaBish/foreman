@@ -203,6 +203,112 @@ foreman_workspace() {
   printf '%s' "$ws"
 }
 
+# --- crew presentation: one workspace per crew member --------------------
+#
+# Herdr has no parent/child relationship between panes or agents: `agent list`
+# carries parent_pane_id/parent_agent_id/depth fields, but nothing can set them
+# and no CLI or socket method exposes one. What Herdr does offer is workspace
+# ordering. So a crew member reads as a child of the foreman by *being* a
+# workspace, created with a child glyph in its label and moved directly after the
+# foreman's own workspace. The relationship lives in our own task records; it is
+# never re-derived from a label pattern.
+
+# The control socket for this session, or nothing when it cannot be resolved.
+# `herdr session list` is authoritative; the ambient variable is the fallback.
+foreman_herdr_socket() {
+  local sock
+  sock=$(foreman_herdr session list --json 2>/dev/null |
+    jq -r --arg s "$FOREMAN_SESSION" '(.sessions // .)[]? | select(.name == $s) | .socket_path' 2>/dev/null |
+    head -1)
+  [ -n "$sock" ] || sock=${HERDR_SOCKET_PATH:-}
+  printf '%s' "$sock"
+}
+
+# Move a workspace to a position in Herdr's list. Presentation only: every
+# failure is the caller's to ignore, and the crew stays where Herdr put it.
+# FOREMAN_HERDR_MOVER overrides the transport so a test can watch the request.
+foreman_herdr_move() { # <workspace-id> <insert-index>
+  local mover=${FOREMAN_HERDR_MOVER:-$FOREMAN_ROOT/bin/herdr-workspace-move.mjs} sock
+  sock=$(foreman_herdr_socket)
+  [ -n "$sock" ] || return 1
+  case "$mover" in
+  *.mjs | *.js)
+    command -v node >/dev/null 2>&1 || return 1
+    node "$mover" "$sock" "$1" "$2" >/dev/null 2>&1
+    ;;
+  *) "$mover" "$sock" "$1" "$2" >/dev/null 2>&1 ;;
+  esac
+}
+
+# Workspace ids of live tasks that name <parent> as their parent workspace, one
+# per line. This is the child set ordering is computed from.
+foreman_workspace_children() { # <parent-workspace-id>
+  local id dir parent ws
+  [ -n "${1:-}" ] || return 0
+  for id in $(foreman_task_ids); do
+    dir=$(foreman_task_dir "$id")
+    parent=$(sed -n 's/^parent_workspace=//p' "$dir/meta" 2>/dev/null | head -1)
+    ws=$(sed -n 's/^workspace=//p' "$dir/meta" 2>/dev/null | head -1)
+    [ "$parent" = "$1" ] && [ -n "$ws" ] && printf '%s\n' "$ws"
+  done
+}
+
+# The 0-based index a just-created workspace should occupy: immediately after its
+# parent, and past every sibling already sitting in that contiguous block. Prints
+# nothing and fails when the parent is not in the list.
+foreman_workspace_order_index() { # <parent-workspace-id> <new-workspace-id>
+  local parent=$1 new=$2 list sibs
+  list=$(foreman_herdr workspace list 2>/dev/null | jq -r '.result.workspaces[]? | .workspace_id' 2>/dev/null) || return 1
+  [ -n "$list" ] || return 1
+  sibs=$(foreman_workspace_children "$parent" | tr '\n' ' ')
+  printf '%s\n' "$list" | awk -v parent="$parent" -v new="$new" -v sibs="$sibs" '
+    BEGIN { n = split(sibs, S, " "); for (i = 1; i <= n; i++) if (S[i] != "") sib[S[i]] = 1 }
+    { ids[NR] = $0; if ($0 == parent) p = NR }
+    END {
+      if (p == 0) exit 1
+      idx = p + 1
+      for (i = p + 1; i <= NR; i++) {
+        if (ids[i] == new || (ids[i] in sib)) idx = i + 1
+        else break
+      }
+      print idx - 1
+    }'
+}
+
+# The workspace this foreman created for a task, or nothing. A task launched into
+# the foreman's own workspace -- the flat fallback, or a record written before
+# crew got workspaces of their own -- does not own one, and adopting or closing
+# that would touch the captain's own workspace.
+foreman_own_workspace() { # <id>
+  local id=$1 ws parent
+  ws=$(foreman_meta_get "$id" workspace)
+  parent=$(foreman_meta_get "$id" parent_workspace)
+  [ -n "$ws" ] || return 0
+  [ -n "$parent" ] || return 0
+  [ "$ws" != "$parent" ] || return 0
+  printf '%s' "$ws"
+}
+
+# Retire the place a crew lived: the workspace this foreman created for it, or
+# the tab it got in the flat fallback. Prints which one it closed.
+foreman_close_home() { # <id> -> workspace | tab | none
+  local id=$1 ws tab
+  ws=$(foreman_own_workspace "$id")
+  tab=$(foreman_meta_get "$id" tab)
+  if [ -n "$ws" ]; then
+    if foreman_herdr workspace close "$ws" >/dev/null 2>&1; then
+      printf 'workspace'
+      return 0
+    fi
+  fi
+  if [ -n "$tab" ]; then
+    foreman_herdr tab close "$tab" >/dev/null 2>&1 || true
+    printf 'tab'
+    return 0
+  fi
+  printf 'none'
+}
+
 # Resolve "<session>:<pane>" back to its pane id, and confirm the pane still
 # exists. Prints nothing and fails when it is gone.
 foreman_pane_of() { # <id>

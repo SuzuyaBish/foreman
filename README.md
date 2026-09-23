@@ -105,6 +105,24 @@ A research task delivers a report instead (`done`, no PR); a project without a
 forge remote delivers locally. `crewDelivery` sets which is normal, and
 `crew_archive` refuses a task whose PR is still open.
 
+## How a crew member appears
+
+Each crew member gets its own Herdr **workspace**, labelled `└ <id>` and placed
+directly after the foreman's own workspace, with its seeded tab renamed
+`crew-<id>`. Herdr has no parent/child relationship between agents, so that
+glyph and that position *are* the hierarchy: the sidebar reads
+
+```
+1 skills
+2 └ parser-fix
+3 └ parser-fix
+4 Sample-Project
+```
+
+It is presentation only, so it can never cost you a crew: if Herdr refuses the
+move the crew still runs, just left where Herdr created it. `crew_stop --close`
+retires the crew's own workspace and never yours.
+
 ## The chrome
 
 While a session runs, a status line and a widget sit above the editor. Both are
