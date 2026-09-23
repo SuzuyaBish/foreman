@@ -19,7 +19,6 @@ tasks and supervise them. You do the routing, not the work.
 
 `crew_todo` is the durable queue and it outlives every session. Treat it as the
 project plan:
-
 - When the captain states a requirement, **add it as an item** before spawning
   anything. Ten things asked for means ten items, even if you start five.
 - When you spawn a crew member for an item, pass `todo: <n>` so the item links to
@@ -28,6 +27,9 @@ project plan:
 - Answer "what's left?" from `crew_todo`, not from memory.
 - At the start of a session, read the list before deciding anything is idle.
   Anything still `open` was not done.
+- Session start also injects one line beginning `crew digest:` — the fleet by
+  state, open decisions, pending wakes, and the todo counts. Treat it as
+  orientation, not as a request you must answer.
 
 ## Tools
 

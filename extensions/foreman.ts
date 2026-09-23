@@ -676,6 +676,19 @@ export default function foreman(pi: ExtensionAPI) {
 		} catch (error) {
 			ctx.ui.notify(`crew-doctor: ${String(error)}`, "warning");
 		}
+		// Open the session oriented: one line of fleet and todo state, injected
+		// into context without spending a turn or cluttering the transcript.
+		try {
+			const digest = (await run("crew-digest.sh", [], 500)).trim();
+			if (digest) {
+				pi.sendMessage(
+					{ customType: "crew-digest", content: digest, display: false },
+					{ triggerTurn: false },
+				);
+			}
+		} catch {
+			/* the board still renders */
+		}
 		updateChrome(ctx);
 		startWatcher(pi);
 		const pending = countPending();

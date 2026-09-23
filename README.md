@@ -95,6 +95,15 @@ widget lists the active crew above the editor. Both are rendered straight from
 the task records — no Herdr call, no model call, no tokens. `/crew` prints the
 board; `/crew on|off` toggles the widget.
 
+At session start the foreman is also handed one injected line, for example:
+
+```
+crew digest: 3 crew (1 working, 1 blocked, 1 review) · 1 decision open · todo 12 items (7 open, 0 active, 5 done)
+```
+
+It is read from the same records, injected into context without triggering a
+turn and without cluttering the transcript, so a fresh session opens oriented.
+
 ## The todo list
 
 `crew_todo` is the durable project queue, and it outlives every session. Ask
@@ -194,6 +203,7 @@ production code path.
 | `bin/crew-pr.sh` / `bin/crew-pr-check.sh` | record / poll a pull request |
 | `bin/crew-projects.sh` / `bin/crew-models.sh` | resolve names |
 | `bin/crew-doctor.sh [--quiet]` | check the machine before a session |
+| `bin/crew-digest.sh` | the one-line session-start digest |
 | `bin/crew-config.sh` | show / set crew settings |
 | `bin/crew-worktree.sh add\|remove` | the git worktree mechanics |
 | `bin/crew-trust.sh <path>` | pi folder trust for a path |

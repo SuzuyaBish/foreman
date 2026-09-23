@@ -179,6 +179,12 @@ The status line and the crew widget are rendered from the task records on a
 local timer and after every tool call. They make no model call and no Herdr call,
 so fleet visibility costs nothing.
 
+Session start also injects one line of context — `crew digest: <fleet> ·
+<decisions> · <wakes> · <todo counts>` — built by `crew-digest.sh` from the same
+records. It is sent with `triggerTurn: false` and `display: false`: the model
+opens oriented without spending a turn, and the captain's transcript stays
+clean. Nothing here reads a pane or a report.
+
 ## Tests
 
 The suite (`bin/crew-test.sh`, `tests/`) is the regression check for the
