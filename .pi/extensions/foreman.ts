@@ -724,6 +724,20 @@ const ACTIVE_STATES = new Set(["queued", "working", "review", "blocked", "failed
 const STATE_ORDER = ["blocked", "failed", "lost", "review", "working", "queued"];
 const STATE_RANK = new Map(STATE_ORDER.map((state, i) => [state, i]));
 
+/**
+ * The width one widget row may occupy. pi renders a string-array widget by
+ * wrapping each line in a Text component, and neither the string-array
+ * `setWidget` path (the only one RPC mode carries) nor the theme exposes the
+ * terminal width, so the chrome bounds itself to a conservative one instead: a
+ * row that fits 80 columns cannot wrap at any common terminal size, and a row
+ * that does not wrap cannot spend more than its share of the six-line budget.
+ * The full item text stays one `crew_todo` call away.
+ */
+const WIDGET_WIDTH = 80;
+
+/** Visible columns ahead of a row's variable text: id(16) + state(8) + age(4) + spaces. */
+const ROW_PREFIX = 16 + 1 + 8 + 1 + 4 + 1;
+
 /** Theme roles, so the chrome reads correctly in a light and a dark terminal. */
 const STATE_COLOR: Record<string, "warning" | "error" | "accent" | "success" | "dim"> = {
 	blocked: "warning",
@@ -750,6 +764,17 @@ function ageOf(at: string): string {
 
 function rankOf(row: CrewRow): number {
 	return STATE_RANK.get(row.state) ?? STATE_ORDER.length;
+}
+
+/**
+ * Clip `text` to `width` characters, marking the cut with an ellipsis. The
+ * chrome counts code units rather than terminal columns; WIDGET_WIDTH is
+ * conservative enough that the difference cannot make a row wrap.
+ */
+function clip(text: string, width: number): string {
+	if (width <= 0) return "";
+	if (width === 1) return "…";
+	return text.length <= width ? text : `${text.slice(0, width - 1)}…`;
 }
 
 function readBoard(): CrewRow[] {
@@ -910,19 +935,34 @@ function updateChrome(ctx: ExtensionContext) {
 		ctx.ui.setWidget("foreman", undefined);
 		return;
 	}
-	const lines = rows
+	const crewShown = rows
 		.filter((r) => ACTIVE_STATES.has(r.state))
-		.sort((a, b) => rankOf(a) - rankOf(b) || a.id.localeCompare(b.id))
-		.slice(0, 6)
-		.map((r) => {
-			const state = fg(STATE_COLOR[r.state] ?? "muted", r.state.padEnd(8));
-			const tail = `${ageOf(r.at).padEnd(4)} ${r.note}`.trimEnd();
-			return `${r.id.padEnd(16)} ${state} ${fg("muted", tail)}`.trimEnd();
-		});
-	for (const item of todo.filter((t) => t.status !== "done").slice(0, Math.max(0, 6 - lines.length))) {
-		const state = fg(item.status === "active" ? "accent" : "dim", item.status.padEnd(8));
+		.sort((a, b) => rankOf(a) - rankOf(b) || a.id.localeCompare(b.id));
+	// Relevance, the rule that keeps the two views from disagreeing. The status
+	// line counts crews by state; the widget has to be able to show the work
+	// behind those counts. So the six-line budget goes: crew rows first,
+	// worst-first; then the not-done items those crews are linked to (the crew
+	// id lives in the todo row's `crew` field) — the work in flight; then the
+	// rest of the queue in file order. An item a counted crew is linked to
+	// therefore never loses its line to an older queued item, so the `active`
+	// row the captain expects from `N working` is always on the board.
+	const linked = new Set(crewShown.map((r) => r.id));
+	const queued = todo.filter((t) => t.status !== "done");
+	const todoShown = [
+		...queued.filter((t) => t.crew && linked.has(t.crew)),
+		...queued.filter((t) => !(t.crew && linked.has(t.crew))),
+	];
+
+	const lines = crewShown.slice(0, 6).map((r) => {
+		const state = fg(STATE_COLOR[r.state] ?? "muted", clip(r.state, 8).padEnd(8));
+		const tail = `${ageOf(r.at).padEnd(4)} ${clip(r.note, WIDGET_WIDTH - ROW_PREFIX)}`.trimEnd();
+		return `${clip(r.id, 16).padEnd(16)} ${state} ${fg("muted", tail)}`.trimEnd();
+	});
+	for (const item of todoShown.slice(0, Math.max(0, 6 - lines.length))) {
+		const state = fg(item.status === "active" ? "accent" : "dim", clip(item.status, 8).padEnd(8));
 		// `-` in the age column keeps a todo row aligned under the crew rows.
-		lines.push(`${`#${item.seq}`.padEnd(16)} ${state} ${fg("muted", `${"-".padEnd(4)} ${item.text}`)}`.trimEnd());
+		const tail = `${"-".padEnd(4)} ${clip(item.text, WIDGET_WIDTH - ROW_PREFIX)}`;
+		lines.push(`${clip(`#${item.seq}`, 16).padEnd(16)} ${state} ${fg("muted", tail)}`.trimEnd());
 	}
 	ctx.ui.setWidget("foreman", lines.length ? lines : undefined);
 }

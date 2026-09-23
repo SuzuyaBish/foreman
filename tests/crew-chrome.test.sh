@@ -145,7 +145,10 @@ test_the_widget_ranks_and_tiers_the_crew() {
   assert_contains "$WIDGET" "[[error]]failed" "a failure is an error"
   assert_contains "$WIDGET" "[[accent]]review" "a waiting PR is accent"
   assert_contains "$WIDGET" "[[success]]working" "a live crew is success"
-  assert_contains "$WIDGET" "[[dim]]open" "a todo in the queue is dim"
+  # Five crew rows leave one todo slot, and relevance gives it to the item the
+  # crew is linked to, so the row here is the in-flight one. The queued row's
+  # dim role is pinned in the relevance test below.
+  assert_contains "$WIDGET" "[[accent]]active" "an in-flight todo is accent"
   assert_contains "$WIDGET" "1h " "the age of a report is shown"
 
   # Worst first, so the top of the widget is what needs the captain.
@@ -199,7 +202,73 @@ line_of() { # <text> <needle> -> 1-based line number
   printf '%s\n' "$1" | grep -n -F -e "$2" | head -1 | cut -d: -f1
 }
 
+# The captain saw the line say `2 working` while the widget showed a single
+# `active` row: the six-line budget filled with the crew rows and then the
+# oldest open items in file order, so the item linked to a working crew never
+# rendered. Relevance now resolves a crew's linked in-flight item before any
+# queued item, so the views agree.
+test_the_widget_keeps_the_in_flight_item_ahead_of_older_queued_ones() {
+  local h out widget now old lines
+  h=$(fm_tmproot chrome-relevance)/home
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  old=$(fm_iso_ago 3600)
+  mkdir -p "$h/tasks/c-alpha" "$h/tasks/c-beta"
+  printf 'state=working\nat=%s\nnote=building the parser\n' "$old" >"$h/tasks/c-alpha/status"
+  printf 'state=working\nat=%s\nnote=landing the parser\n' "$now" >"$h/tasks/c-beta/status"
+  # Two crew rows leave four todo slots, and the linked item is last in file
+  # order, so only the relevance rule can save it: the oldest open rows are the
+  # ones that give up their lines.
+  printf '17\topen\t-\tolder queued one\n18\topen\t-\tolder queued two\n19\topen\t-\tolder queued three\n20\topen\t-\tolder queued four\n21\tactive\tc-beta\tland the parser\n' \
+    >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  assert_contains "$widget" "c-alpha" "the first working crew renders"
+  assert_contains "$widget" "c-beta" "the second working crew renders"
+  assert_contains "$widget" "[[accent]]active" "the in-flight item carries the active role"
+  assert_contains "$widget" "[[dim]]open" "a queued item carries the dim role"
+  assert_contains "$widget" "#21" "the linked active item keeps its line"
+  assert_not_contains "$widget" "older queued four" "the oldest open row gives up its slot"
+
+  lines=$(printf '%s\n' "$widget" | grep -c .)
+  [ "$lines" -le 6 ] || fail "the widget grew past its budget ($lines lines)"
+  pass "the widget renders the in-flight item before older queued ones"
+}
+
+# A requirement typed as one long sentence used to wrap into several terminal
+# lines and eat the six-line budget. Each row is now bounded to a conservative
+# width and clipped with an ellipsis; the full text stays in crew_todo.
+test_an_enormous_item_is_truncated_and_keeps_the_budget() {
+  local h out widget huge longest lines
+  h=$(fm_tmproot chrome-long)/home
+  mkdir -p "$h/tasks/c-alpha"
+  printf 'state=working\nat=%s\nnote=busy\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/c-alpha/status"
+  huge=$(printf 'x%.0s' {1..400})
+  printf '31\topen\t-\t%s\n32\topen\t-\tshort after the huge one\n' "$huge" >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  assert_contains "$widget" "…" "the long row is marked as truncated"
+  assert_not_contains "$widget" "$huge" "the full item text is not printed"
+  assert_contains "$widget" "#32" "a row after the long one still renders"
+  assert_contains "$widget" "short after the huge one" "the following item is intact"
+
+  # Measure visible columns, not string length: strip the fake theme's role
+  # tags and fold the multibyte ellipsis to one byte first, then take the
+  # longest row.
+  longest=$(printf '%s\n' "$widget" | sed 's/\[\[[^]]*\]\]//g; s/…/./g' | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+  [ "$longest" -le 80 ] || fail "a widget row wraps past its bound ($longest columns)"
+
+  lines=$(printf '%s\n' "$widget" | grep -c .)
+  [ "$lines" -le 6 ] || fail "the widget grew past its budget ($lines lines)"
+  pass "a long item row is truncated to one line and the rows after it survive"
+}
+
 test_the_status_line_leads_with_what_is_owed
 test_the_widget_ranks_and_tiers_the_crew
 test_the_widget_can_be_turned_off
 test_the_chrome_is_scoped_to_the_project_in_focus
+test_the_widget_keeps_the_in_flight_item_ahead_of_older_queued_ones
+test_an_enormous_item_is_truncated_and_keeps_the_budget
