@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="foreman - a captain to foreman to crew harness. I don't treat. I diagnose." src="assets/banner.png" width="100%" />
+</p>
+
 # foreman
 
 Talk to one agent. It runs the crew. Your context stays flat.
