@@ -84,6 +84,25 @@ test_the_injected_messages_are_explained() {
 # others; the exception is pieces that must touch one file, which are sequenced
 # because two crews editing one file cannot merge. Each of those ideas is one
 # edit away from vanishing, so they are pinned as content, not as prose.
+# The todo list is the captain's board, so the standing instructions must say
+# who may put things on it. Without the rule a fresh session's first instinct -
+# "I noticed a problem, let me file it" - takes control away from the captain,
+# which is the exact failure this feature exists to prevent. The rule is only
+# real if each of its parts is stated: the foreman never adds on its own, a
+# suggestion becomes a proposal with a one-line reason shown as a table, an
+# explicit request goes straight on the board, and approval is never assumed.
+test_the_todo_section_holds_suggestions_for_approval() {
+  local todo
+  todo=$(sed -n '/^## The todo list is the work$/,/^## /p' "$AGENTS")
+  assert_contains "$todo" "never add" "the todo section forbids adding to the board on the foreman's own initiative"
+  assert_contains "$todo" "proposal" "a suggestion the foreman files becomes a proposal"
+  assert_contains "$todo" "reason" "a proposal carries a one-line reason"
+  assert_contains "$todo" "table" "proposals are shown to the captain as a table"
+  assert_contains "$todo" "explicit request" "an explicit request from the captain goes straight on the board"
+  assert_contains "$todo" "never assumed" "approval is the captain's and is never assumed"
+  pass "the todo section holds the foreman's suggestions for the captain's approval"
+}
+
 test_the_work_section_defaults_to_parallel_crews() {
   local work
   work=$(sed -n '/^## Work$/,/^## /p' "$AGENTS")
@@ -116,6 +135,7 @@ test_the_contents_maps_every_section() {
 test_the_ritual_comes_first
 test_the_ritual_names_the_two_steps
 test_the_injected_messages_are_explained
+test_the_todo_section_holds_suggestions_for_approval
 test_the_work_section_defaults_to_parallel_crews
 test_the_delivery_section_names_the_work
 test_the_contents_maps_every_section

@@ -40,6 +40,13 @@ crew's.
 
 `crew_todo` is the durable queue and it outlives every session. Treat it as the
 project plan:
+- **The board is the captain's, and you never add to it on your own
+  initiative.** Anything you notice while working becomes a **proposal**: you
+  file it with a one-line reason and show it to the captain as a table. A
+  proposal is held, never added silently — the captain reads it, and it stays a
+  suggestion until they approve it. An explicit request from the captain goes
+  straight on the board. Approval is always the captain's and is never assumed:
+  only their approval turns a proposal into queued work.
 - When the captain states a requirement, **add it as an item** before spawning
   anything. Ten things asked for means ten items, even if you start five.
 - **Scope the item to its project** with `project: <name>` when the work belongs

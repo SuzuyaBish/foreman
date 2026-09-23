@@ -15,6 +15,7 @@ TODO="$BIN/crew-todo.sh"
 # Add an item and print its sequence, so a test never hard-codes a number an
 # earlier test has already advanced.
 add_item() { "$TODO" add "$@" | sed -n 's/^added #\([0-9][0-9]*\).*/\1/p'; }
+propose_item() { "$TODO" propose "$@" | sed -n 's/^proposed #\([0-9][0-9]*\).*/\1/p'; }
 
 test_add_and_sequence() {
   local out
@@ -201,6 +202,74 @@ test_summary() {
   pass "summary is a one-line count"
 }
 
+# --- proposals --------------------------------------------------------------
+#
+# The board belongs to the captain, so a suggestion the foreman files on its own
+# initiative is a separate tier: it reads as `proposed`, it is shown as a table
+# with its reason, and it never appears on the board. Only the captain's
+# `approve` promotes it, and it keeps the number they already saw.
+test_proposals_wait_for_the_captain() {
+  local out seq row other
+  "$TODO" focus foreman >/dev/null
+
+  out=$("$TODO" propose --note "spotted while reviewing #1" "add a flake check to CI")
+  case "$out" in
+  "proposed #"*"(foreman)") : ;;
+  *) fail "a proposal is filed and says so (got '$out')" ;;
+  esac
+  seq=$(printf '%s' "$out" | sed -n 's/^proposed #\([0-9][0-9]*\).*/\1/p')
+
+  assert_equals "proposed" "$(awk -F'\t' -v s="$seq" '$1 == s { print $2 }' "$FOREMAN_HOME/todo.tsv")" \
+    "a proposal is stored as proposed, not open"
+  assert_equals "spotted while reviewing #1" "$(awk -F'\t' -v s="$seq" '$1 == s { print $5 }' "$FOREMAN_HOME/todo.tsv")" \
+    "the one-line reason lives in the note field"
+
+  # The board never mixes in the foreman's suggestion, not even with --all.
+  assert_not_contains "$("$TODO" list)" "add a flake check to CI" "the captain's board does not show a proposal"
+  assert_not_contains "$("$TODO" list --all)" "add a flake check to CI" "even --all keeps a proposal off the board"
+
+  out=$("$TODO" proposals)
+  assert_contains "$out" "PROPOSED" "the proposals view prints a table"
+  assert_contains "$out" "REASON" "the table has a reason column"
+  row=$(printf '%s\n' "$out" | awk -v s="$seq" '$1 == s')
+  assert_contains "$row" "add a flake check to CI" "the table row carries the proposal text"
+  assert_contains "$row" "spotted while reviewing #1" "the table row carries the reason"
+
+  assert_contains "$("$TODO" summary)" "1 proposed" "summary counts proposals separately"
+
+  # A proposal has no crew to follow, so sync must not touch it.
+  "$TODO" sync >/dev/null
+  assert_equals "proposed" "$(awk -F'\t' -v s="$seq" '$1 == s { print $2 }' "$FOREMAN_HOME/todo.tsv")" \
+    "sync leaves a proposal alone"
+
+  # Approve promotes in place and keeps the number the captain read.
+  "$TODO" approve "$seq" >/dev/null
+  assert_equals "open" "$(awk -F'\t' -v s="$seq" '$1 == s { print $2 }' "$FOREMAN_HOME/todo.tsv")" \
+    "approval promotes a proposal to open"
+  out=$("$TODO" list)
+  assert_contains "$out" "add a flake check to CI" "an approved proposal joins the board"
+  row=$(printf '%s\n' "$out" | grep -F "add a flake check to CI" | head -1)
+  assert_equals "$seq" "$(printf '%s\n' "$row" | awk '{ print $1 }')" \
+    "approval keeps the proposal's number"
+  if "$TODO" approve "$seq" >/dev/null 2>&1; then fail "approving a row that is not proposed was accepted"; fi
+
+  # Decline behaves exactly like dropping any row.
+  other=$(propose_item --note "not worth it" "rename the widget")
+  "$TODO" drop "$other" >/dev/null
+  assert_equals "dropped" "$(awk -F'\t' -v s="$other" '$1 == s { print $2 }' "$FOREMAN_HOME/todo.tsv")" \
+    "a declined proposal is dropped"
+  assert_not_contains "$("$TODO" proposals)" "rename the widget" "a declined proposal leaves the table"
+
+  # The table reads one scope, like the board.
+  "$TODO" propose --project Example_App --note "another project" "sheet idea" >/dev/null
+  assert_not_contains "$("$TODO" proposals)" "sheet idea" "the proposals table reads the scope in focus"
+  assert_contains "$("$TODO" proposals --all)" "sheet idea" "--all shows proposals from every scope"
+
+  if "$TODO" propose >/dev/null 2>&1; then fail "an empty proposal was accepted"; fi
+  if "$TODO" propose --project "bad name" nope >/dev/null 2>&1; then fail "a bad project name was accepted by propose"; fi
+  pass "proposals are held for the captain's approval, off their board"
+}
+
 # --- scope ------------------------------------------------------------------
 
 # One harness serves many projects, so an item belongs to a project and the
@@ -304,3 +373,4 @@ test_scopes_keep_projects_apart
 test_focus_follows_the_newest_crew
 test_start_adopts_the_crews_project
 test_sync_backfills_scope_from_the_crew
+test_proposals_wait_for_the_captain
