@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# house - start a pi session in house mode.
+#
+# House is foreman's sibling: the same repo, the same extension, a different
+# discipline. `bin/foreman` runs the crew; `bin/house` takes the chart and
+# writes prescriptions and never spawns, merges, archives or executes. The
+# marker is exported so the extension knows to open the session with the
+# rounds, and so the house skill is the one that frames the work.
+set -eu
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$DIR"
+mkdir -p projects worktrees
+export FOREMAN_MODE=house
+exec "${FOREMAN_PI_BIN:-pi}" "$@"
