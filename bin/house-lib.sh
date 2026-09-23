@@ -217,25 +217,32 @@ house_edit() { # <path> [--set <key> <value>]... [--log <date> <text>]...
   trap - EXIT
 }
 
-house_today() { date +%Y-%m-%d; }
+# One convention, UTC everywhere. `updated` is written as a UTC civil date and
+# the age is a difference of UTC calendar days, so the stale boundary does not
+# move with the reader's TZ.
+house_today() { date -u +%Y-%m-%d; }
 house_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 house_ts() { date -u +%Y%m%dT%H%M%SZ; }
 
-# A YYYY-MM-DD date to epoch, GNU or BSD date.
+# A YYYY-MM-DD date to epoch at UTC midnight, GNU or BSD date.
 house_epoch_date() { # <YYYY-MM-DD>
-  date -j -f '%Y-%m-%d' "$1" +%s 2>/dev/null ||
-    date -d "$1" +%s 2>/dev/null || printf ''
+  TZ=UTC0 date -j -f '%Y-%m-%d' "$1" +%s 2>/dev/null ||
+    TZ=UTC0 date -d "$1" +%s 2>/dev/null || printf ''
 }
 
-# Days since the chart was last touched; empty when the date is unreadable.
+# Whole UTC calendar days since the chart was last written. Negative for a date
+# in the future, empty when the date is unreadable. Calendar days, not elapsed
+# seconds, so `house_today` and the field are always read the same way.
 house_age_days() { # <path>
-  local updated since now
+  local updated since today today_epoch
   updated=$(house_field "$1" updated)
   [ -n "$updated" ] || return 1
   since=$(house_epoch_date "$updated")
   [ -n "$since" ] || return 1
-  now=$(date +%s)
-  printf '%s' "$(((now - since) / 86400))"
+  today=$(house_today)
+  today_epoch=$(house_epoch_date "$today")
+  [ -n "$today_epoch" ] || return 1
+  printf '%s' "$(((today_epoch - since) / 86400))"
 }
 
 # Every active slug, sorted. With --all, archived slugs follow and are marked

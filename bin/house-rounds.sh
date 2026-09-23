@@ -52,6 +52,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# The bound may come from the environment or the flag; validate whichever one
+# is in force, so `HOUSE_STALE_DAYS=nope` fails once instead of printing a bad
+# integer comparison for every row.
+case "$STALE_DAYS" in
+'' | *[!0-9]*) house_die "stale days must be a whole number (got: ${HOUSE_STALE_DAYS:-})" ;;
+esac
+
 total=0
 stale_count=0
 none_count=0
@@ -85,6 +92,9 @@ for slug in $slugs; do
   if [ -z "$age" ]; then
     stale=1
     marks="$marks [stale ?]"
+  elif [ "$age" -lt 0 ]; then
+    stale=1
+    marks="$marks [future]"
   elif [ "$age" -gt "$STALE_DAYS" ]; then
     stale=1
     marks="$marks [stale ${age}d]"

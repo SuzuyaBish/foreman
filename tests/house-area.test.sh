@@ -13,7 +13,7 @@ NEXT="$BIN/house-next.sh"
 AREAS="$FOREMAN_HOME/house/areas"
 ARCHIVED="$FOREMAN_HOME/house/archived"
 CHART="$AREAS/atlas.md"
-TODAY=$(date +%Y-%m-%d)
+TODAY=$(date -u +%Y-%m-%d)
 
 field() { # <path> <key>
   sed -n "s/^$2: //p" "$1" 2>/dev/null | head -n 1
@@ -176,7 +176,7 @@ test_note_appends_a_log_to_a_headerless_chart() {
   local content
   content=$(cat "$AREAS/bare.md")
   assert_contains "$content" "## Log" "the log header is created"
-  assert_contains "$content" "- $(date +%Y-%m-%d) - first note" "the note is logged"
+  assert_contains "$content" "- $(date -u +%Y-%m-%d) - first note" "the note is logged"
   rm -f "$AREAS/bare.md"
   pass "a headerless chart gets a log rather than a stray field after the log lines"
 }

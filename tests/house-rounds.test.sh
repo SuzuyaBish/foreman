@@ -103,6 +103,32 @@ test_all_includes_archived() {
   pass "--all is the only way an archived area shows up"
 }
 
+test_house_today_is_utc() {
+  local today
+  today=$(. "$ROOT/bin/house-lib.sh" && house_today)
+  assert_equals "$(date -u +%Y-%m-%d)" "$today" "house_today is a UTC civil date"
+  pass "the chart's clock is UTC, not the reader's"
+}
+
+test_future_updated_is_stale() {
+  "$AREA" add future --kind repo >/dev/null
+  "$NEXT" future "do the thing" >/dev/null
+  backdate future "2999-01-01"
+  local out
+  out=$("$ROUNDS")
+  assert_contains "$out" "[future]" "a future updated is marked, not treated as fresh"
+  rm -f "$FOREMAN_HOME/house/areas/future.md"
+  pass "a future updated date is stale, not immortal"
+}
+
+test_stale_days_env_is_validated() {
+  local out
+  if HOUSE_STALE_DAYS=nope "$ROUNDS" >/dev/null 2>&1; then fail "a non-numeric HOUSE_STALE_DAYS was accepted"; fi
+  out=$(HOUSE_STALE_DAYS=1000 "$ROUNDS")
+  assert_contains "$out" "0 stale" "a numeric HOUSE_STALE_DAYS is honoured"
+  pass "HOUSE_STALE_DAYS is validated like --stale-days"
+}
+
 test_empty
 test_marks_no_next_and_stale
 test_no_next_is_marked
@@ -110,3 +136,6 @@ test_whitespace_next_is_not_a_next
 test_stale_bound_is_configurable
 test_digest_is_one_line
 test_all_includes_archived
+test_house_today_is_utc
+test_future_updated_is_stale
+test_stale_days_env_is_validated
