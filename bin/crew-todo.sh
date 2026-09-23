@@ -2,6 +2,9 @@
 # crew-todo.sh - the durable project todo list.
 #
 # Usage: crew-todo.sh add [--note <text>] [--project <scope>] <text...>
+#        crew-todo.sh propose [--note <reason>] [--project <scope>] <text...>
+#        crew-todo.sh approve <seq>
+#        crew-todo.sh proposals [--all|--project <scope>]
 #        crew-todo.sh note <seq> <text...>
 #        crew-todo.sh list [--all|--open] [--project <scope>] [--no-notes]
 #        crew-todo.sh start <seq> <crew-id>
@@ -13,13 +16,22 @@
 #        crew-todo.sh sync
 #        crew-todo.sh summary [--all|--project <scope>]
 #
+# Two tiers. A row the captain asked for is theirs: `add` writes it `open` and
+# `list` is their board. A row the foreman noticed on its own is a *proposal*:
+# `propose` writes it `proposed` with the one-line reason in the note field,
+# `proposals` shows them as a table, and it never appears on the board. Only
+# `approve` - the captain's decision - promotes a proposal to `open`, and it
+# keeps the number the captain already saw. `drop` declines it like any row.
+#
 # The list outlives every session. A new foreman session reads it and knows what
 # is queued, what is in flight, and what finished — rather than reconstructing
 # that from memory, which is exactly what a restart destroys.
 #
 # Rows are tab separated: <seq> <status> <crew-id-or-dash> <text> <note> <scope>
-# Status is the INTENT (open, active, done, dropped). The crew's own state is
-# read live and shown beside it, so a row never silently disagrees with reality.
+# Status is the INTENT (open, active, done, dropped, proposed). A proposal has
+# no crew to follow and is never read as the captain's work. The crew's own
+# state is read live and shown beside it, so a row never silently disagrees
+# with reality.
 # `note` is optional context for one item (`-` when absent); it is kept out of
 # the item text so the board stays one line per item.
 #
@@ -161,7 +173,7 @@ todo_crew_reached_done() { # <crew-id>
 
 ACTION=${1:-list}
 case "$ACTION" in
-add)
+add | propose)
   if [ $# -ge 1 ]; then shift; fi
   NOTE=-
   SCOPE=""
@@ -186,17 +198,79 @@ add)
     esac
   done
   TEXT=$(todo_sanitize "${PARTS[*]-}")
-  [ -n "$TEXT" ] || foreman_die "usage: crew-todo.sh add [--note <text>] [--project <scope>] <text...>"
+  [ -n "$TEXT" ] || foreman_die "usage: crew-todo.sh $ACTION [--note <text>] [--project <scope>] <text...>"
   todo_init
   # No explicit project means the work belongs to whatever is in focus. The
   # scope is written down at add time, so a later focus change never silently
   # moves history into another project.
   [ -n "$SCOPE" ] || SCOPE=$(todo_scope)
+  # `add` is the captain's request and goes straight on the board. `propose`
+  # is the foreman's own suggestion: it is filed apart, with its reason in the
+  # note field, and waits for `approve` before it becomes the captain's work.
+  if [ "$ACTION" = propose ]; then STATUS=proposed; else STATUS=open; fi
   lock=$(todo_lock)
   seq=$(todo_next_seq)
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$seq" open - "$TEXT" "$NOTE" "$SCOPE" >>"$TODO"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$seq" "$STATUS" - "$TEXT" "$NOTE" "$SCOPE" >>"$TODO"
   rmdir "$lock" 2>/dev/null || true
-  printf 'added #%s (%s)\n' "$seq" "$SCOPE"
+  if [ "$ACTION" = propose ]; then
+    printf 'proposed #%s (%s)\n' "$seq" "$SCOPE"
+  else
+    printf 'added #%s (%s)\n' "$seq" "$SCOPE"
+  fi
+  ;;
+approve)
+  SEQ=${2:-}
+  todo_init
+  todo_valid_seq "$SEQ" || foreman_die "no todo item #${SEQ:-<none>}"
+  # Approval is the captain's act and applies only to a proposal. Promoting
+  # anything else would make `approve` a synonym for `open`.
+  CUR=$(awk -F'\t' -v s="$SEQ" '$1 == s { print $2 }' "$TODO")
+  [ "$CUR" = proposed ] || foreman_die "#$SEQ is not a proposal (status: ${CUR:-unknown})"
+  lock=$(todo_lock)
+  tmp="$TODO.tmp.$$"
+  # The number and the note (the reason the captain saw) are kept: a reference
+  # they have already read stays good.
+  awk -F'\t' -v s="$SEQ" '
+    BEGIN { OFS = "\t" }
+    { if (NF < 5) $5 = "-"; if ($1 == s) $2 = "open"; print }
+  ' "$TODO" >"$tmp"
+  mv "$tmp" "$TODO"
+  rmdir "$lock" 2>/dev/null || true
+  printf '#%s open (approved)\n' "$SEQ"
+  ;;
+proposals)
+  todo_init
+  SCOPE=""
+  shift || true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    --all) SCOPE="*" ;;
+    --project)
+      [ $# -ge 2 ] || foreman_die "--project requires a name"
+      todo_scope_sane "$2" || foreman_die "bad project: $2 (letters, digits, . _ - only)"
+      SCOPE=$2
+      shift
+      ;;
+    *) foreman_die "unknown proposals option: $1" ;;
+    esac
+    shift
+  done
+  [ -n "$SCOPE" ] || SCOPE=$(todo_scope)
+  # The table the foreman shows the captain: number, proposal, reason. Pending
+  # only, so an approved or declined suggestion is gone from it.
+  awk -F'\t' -v scope="$SCOPE" '
+    BEGIN { printf "%-4s %-36s %s\n", "#", "PROPOSED", "REASON" }
+    $2 != "proposed" { next }
+    {
+      s = ($6 == "" ? "foreman" : $6)
+      if (scope != "*" && s != scope) next
+      n++
+      printf "%-4s %-36s %s\n", $1, $4, ($5 == "" ? "-" : $5)
+    }
+    END {
+      if (n == 0) printf "  (no proposals in %s)\n", (scope == "*" ? "any scope" : scope)
+    }
+  ' "$TODO"
   ;;
 note)
   SEQ=${2:-}
@@ -274,6 +348,13 @@ sync)
   while IFS=$'\t' read -r seq status crew text note scope; do
     [ -n "$seq" ] || continue
     [ -n "$note" ] || note=-
+    # A proposal is the foreman's suggestion, not work a crew follows. It has
+    # no crew to reconcile against, so sync hands it back untouched - scope
+    # included: a suggestion never moves between projects behind the captain.
+    if [ "$status" = proposed ]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$seq" "$status" "$crew" "$text" "$note" "$scope"
+      continue
+    fi
     # Rows written before scopes existed get theirs from the crew they are
     # linked to, so an upgrade does not silently file project work under
     # `foreman`. An explicit scope is never rewritten.
@@ -331,9 +412,12 @@ summary)
   # must not create files.
   [ -f "$TODO" ] || TODO=/dev/null
   awk -F'\t' -v scope="$SCOPE" -v all="$ALL" '
-    function line(s,   id) {
+    function line(s,   id, suf) {
       id = s ": "
-      printf "%s%d item%s (%d open, %d active, %d done)", id, total[s], (total[s] == 1 ? "" : "s"), o[s], a[s], d[s]
+      # Proposals are counted apart, and only named when there are some, so a
+      # board with no suggestions reads exactly as it always did.
+      suf = (p[s] > 0 ? sprintf(", %d proposed", p[s]) : "")
+      printf "%s%d item%s (%d open, %d active, %d done%s)", id, total[s], (total[s] == 1 ? "" : "s"), o[s], a[s], d[s], suf
     }
     {
       s = ($6 == "" ? "foreman" : $6)
@@ -341,12 +425,13 @@ summary)
       if ($2 == "open") o[s]++
       else if ($2 == "active") a[s]++
       else if ($2 == "done") d[s]++
+      else if ($2 == "proposed") p[s]++
       if (!(s in seen)) { seen[s] = 1; gn++; names[gn] = s }
     }
     END {
       if (all == 1) {
-        for (g = 1; g <= gn; g++) { n += total[names[g]]; O += o[names[g]]; A += a[names[g]]; D += d[names[g]] }
-        printf "all scopes: %d items (%d open, %d active, %d done)\n", n, O, A, D
+        for (g = 1; g <= gn; g++) { n += total[names[g]]; O += o[names[g]]; A += a[names[g]]; D += d[names[g]]; P += p[names[g]] }
+        printf "all scopes: %d items (%d open, %d active, %d done%s)\n", n, O, A, D, (P > 0 ? sprintf(", %d proposed", P) : "")
       } else {
         line(scope)
         tail = ""
@@ -418,6 +503,9 @@ list)
       s0 = ($6 == "" ? "foreman" : $6)
       if ($2 == "open") open[s0]++
       if (!(s0 in allseen)) { allseen[s0] = 1; an++; allorder[an] = s0 }
+      # A proposal is a suggestion from the foreman, never the captain work,
+      # so it is kept off the board even with `--all`. `proposals` is its view.
+      if ($2 == "proposed") next
       if (scope != "*" && s0 != scope) next
       if ($2 == "dropped" && filter != "all") next
       if (filter == "open" && $2 != "open" && $2 != "active") next
@@ -441,6 +529,6 @@ list)
   ' "$TODO"
   ;;
 *)
-  foreman_die "usage: crew-todo.sh add|note|list|start|done|open|drop|item|sync|summary"
+  foreman_die "usage: crew-todo.sh add|propose|approve|proposals|note|list|start|done|open|drop|item|sync|summary"
   ;;
 esac
