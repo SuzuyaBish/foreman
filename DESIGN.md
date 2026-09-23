@@ -264,6 +264,23 @@ requires, and the reason a blocking poll never holds a turn. A crew member
 building a visual deliverable uses a board by default and reports
 `needs-decision [key=board-url]` with the URL when the captain owes a review.
 
+Lavish has no auto-detected pick UI: a board is only interactive if the artifact
+builds the controls and calls `window.lavish.queuePrompt()` itself, once, from an
+explicit submit. A board built by hand for the social preview did neither, so it
+reached the captain with nothing to click; its safe-margin overlay was also an
+absolutely positioned guide with no clip, under a small-frame override written as
+two classes compounded on an ancestor that the body never carried, so the guide
+painted across the page. Both faults are now structural rather than remembered:
+`assets/board-template.html` is our own vendored, self-contained board that
+demonstrates the single-choice and multi-pick shapes with the guides clipped by
+`overflow: hidden` on the frame and the small-frame override on the frame itself;
+and `bin/crew-board.sh check` runs before a board opens (from `crew-lavish.sh`,
+which the captain's tool calls, and from the crew's generated `lavish_open`). It
+refuses a board that declares no choices — `--text-only` is the escape for a
+deliberately static board — and warns on an unclipped overlay or the
+ancestor-compound selector. The check reads the running document with comments
+stripped, so the contract in a comment cannot satisfy it.
+
 Poll output is not forwarded whole. `lavish-axi` appends a full DOM serialization
 of the artifact, which is the largest part of the response and is not the
 feedback, so both tools replace the `dom_snapshot:` line with a marker and cap

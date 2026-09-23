@@ -38,6 +38,7 @@ export default function (pi: any) {
   const BUSY = "__BUSY_EVENT__";
   const REPORT = "__REPORT__";
   const PROCESSES = "__PROCESSES__";
+  const LAVISH = "__LAVISH__";
 
   // `lavish-axi` results end with a full DOM serialization of the artifact. It
   // is the largest part of the response and it is not the feedback, so trim it
@@ -169,20 +170,26 @@ export default function (pi: any) {
       "Open or resume a Lavish review board for an HTML artifact, so the captain can " +
       "annotate it in the browser and send structured feedback back. Use it whenever " +
       "your deliverable is visual, or when a decision is easier to review visually " +
-      "than in prose.",
+      "than in prose. The board is checked first: a page that declares no choices is " +
+      "refused, because Lavish draws no pick UI of its own. Set textOnly to open a " +
+      "deliberately static board.",
     parameters: {
       type: "object",
       properties: {
         file: { type: "string", description: "Path to the HTML artifact" },
+        textOnly: { type: "boolean", description: "Open a deliberately static, non-interactive board" },
       },
       required: ["file"],
     },
     async execute(_toolCallId: string, params: any) {
+      const args = params.textOnly
+        ? ["open", "--text-only", String(params.file)]
+        : ["open", String(params.file)];
       return await new Promise((resolve: any) => {
         execFile(
-          "lavish-axi",
-          [params.file],
-          { cwd: process.cwd(), maxBuffer: 8 * 1024 * 1024 },
+          LAVISH,
+          args,
+          { cwd: process.cwd(), maxBuffer: 8 * 1024 * 1024, env: { ...process.env, FOREMAN_HOME: HOME } },
           (err: any, stdout: string, stderr: string) => {
             const text = boundLavish(`${stdout || ""}${stderr || ""}`);
             resolve({
@@ -266,6 +273,7 @@ sed -e "s|__ID__|$ID|g" \
   -e "s|__BUSY_EVENT__|$FOREMAN_ROOT/bin/crew-busy-event.sh|g" \
   -e "s|__REPORT__|$FOREMAN_ROOT/bin/crew-report.sh|g" \
   -e "s|__PROCESSES__|$FOREMAN_ROOT/bin/crew-processes.sh|g" \
+  -e "s|__LAVISH__|$FOREMAN_ROOT/bin/crew-lavish.sh|g" \
   "$TMP" >"$TARGET"
 rm -f "$TMP"
 printf '%s\n' "$TARGET"

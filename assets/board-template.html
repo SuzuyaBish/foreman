@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Board</title>
+<!--
+  foreman board template - a self-contained HTML artifact for a Lavish review board.
+
+  Adapted from firstmate's `board-template.html` (the Bearings fleet board):
+    https://github.com/kunchenguid/firstmate
+    .agents/skills/bearings/assets/board-template.html
+  firstmate is MIT licensed, Copyright (c) 2026 Kun Chen. See
+  assets/board-template.LICENSE alongside this file for the full notice.
+
+  ---------------------------------------------------------------------------
+  THE CONTRACT - read before you edit, and do not rediscover it the hard way.
+  ---------------------------------------------------------------------------
+  Lavish draws NO pick UI of its own. A board is a plain HTML page; the page has
+  to build its own controls and tell Lavish what the captain chose. Concretely:
+
+  1. Declare every question. A single choice is a
+     <form data-lavish-question="my-key"> wrapping radio inputs named "answer"
+     plus a submit button. A multi-pick is checkbox rows plus a dispatch bar
+     whose button carries a `queueKey`.
+  2. Queue EXACTLY once, on an explicit submit - never on `change`. `change`
+     only updates local UI state. Queueing on change files an answer the captain
+     did not send, and the queue is browser-local, so it is invisible until the
+     composer sends it.
+  3. Queue through `window.lavish.queuePrompt(text, options)`. It may be absent
+     (a plain browser); guard for it. `options.element` ties the annotation to
+     the control, `options.tag` and `options.text` are what the captain sees.
+  4. The captain queues his answers and then presses the composer's red
+     "Send & End" - that submits the queue and ends in one act. The overflow
+     menu's "End session" only POSTs /end and drops the browser-local queue.
+     Say so wherever you tell the captain to review the board.
+
+  This file ships as a live, working demo of both shapes. Replace the sample
+  content between the REPLACE markers with your own; keep the two forms wired
+  the way they are. `bin/crew-board.sh check <this-file>` verifies the contract
+  before the captain ever sees the board.
+-->
+<style>
+/* ============================================================
+   foreman board - tokens and chrome. Self-contained: no webfonts, no
+   external images, no build step. Everything resolves in the browser.
+   ============================================================ */
+:root {
+  --ink-900: #241c14; --ink-700: #3f3224; --ink-500: #6f5e46; --ink-300: #9c8a6c;
+  --paper-000: #fbf4e2; --paper-100: #f6ecd3; --paper-200: #f0e3c4; --paper-300: #e7d6ae;
+  --cream-line: #ddc89c;
+  --rust-700: #8f2f17; --rust-600: #a93a1f; --rust-500: #c0452a; --rust-400: #d35f3f; --rust-050: #fbece3;
+  --gold-600: #b5791c; --gold-500: #e0a52e; --gold-300: #f0d38c;
+  --ocean-600: #2f6688; --ocean-500: #3c7ea6; --ocean-050: #e8f1f5;
+  --sea-700: #234e3a; --sea-500: #2f6b4f; --sea-200: #b9d4c5; --sea-050: #e9f2ec;
+  --white: #fffdf7;
+  --bg-page: var(--paper-100);
+  --surface-card: var(--white);
+  --surface-warm: var(--paper-000);
+  --text-strong: var(--ink-900); --text-body: var(--ink-700);
+  --text-muted: var(--ink-500); --text-faint: var(--ink-300);
+  --border-default: var(--cream-line); --border-soft: var(--paper-300);
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius-sm: 9px; --radius-md: 12px; --radius-lg: 18px; --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgba(36, 28, 20, 0.06), 0 4px 10px rgba(36, 28, 20, 0.06);
+  --shadow-hard-sm: 3px 3px 0 var(--ink-900);
+  --container: 1080px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  color: var(--text-body);
+  background: var(--bg-page);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { color: var(--text-strong); line-height: 1.2; margin: 0; }
+a { color: inherit; }
+code { font-family: var(--font-mono); font-size: 0.9em; }
+
+/* ---- top bar ---- */
+.bd-nav { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--paper-100) 88%, transparent);
+  backdrop-filter: saturate(150%) blur(10px); border-bottom: 1px solid var(--border-default); }
+.bd-nav__inner { max-width: var(--container); margin: 0 auto; padding: 0 24px; height: 60px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.bd-brand { display: inline-flex; align-items: center; gap: 10px; font-family: var(--font-display);
+  font-size: 22px; color: var(--text-strong); }
+.bd-brand__disc { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 999px;
+  background: var(--rust-500); color: var(--paper-000); border: 2px solid var(--ink-900); box-shadow: 2px 2px 0 var(--ink-900); }
+.bd-brand__disc svg { width: 62%; height: 62%; }
+.bd-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 0.8125rem; font-weight: 700; color: var(--text-muted); user-select: none; }
+.bd-toggle input { accent-color: var(--rust-500); }
+
+/* ---- page ---- */
+.bd-main { max-width: var(--container); margin: 0 auto; padding: 26px 24px 72px;
+  display: flex; flex-direction: column; gap: 22px; }
+.bd-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.16em; font-size: 0.75rem; color: var(--rust-500); }
+.bd-lede { margin: 0; max-width: 62ch; font-size: 1rem; color: var(--text-muted); }
+.bd-card { background: var(--surface-card); border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 20px 22px; }
+.bd-card--stack { display: flex; flex-direction: column; gap: 12px; }
+.bd-card h2 { font-size: 1.2rem; }
+
+/* ============================================================
+   The safe-margin guides. The bug we paid for: an overlay sized in fixed
+   pixels, anchored in a box with no clip, so it painted across the page.
+   Two rules keep it inside its own frame, and both must hold:
+     * `overflow: hidden` on .frame - the box can never leak, whatever the
+       guides are sized to;
+     * the small-frame override is written on the frame itself
+       (`.safe-on .frame.sm`), never as two classes compounded on an ancestor
+       (`.sm` plus `.safe-on` on one element): such a selector needs an
+       ancestor carrying BOTH classes, the body carries only one, so the
+       override silently never applies and the full-size guide bleeds.
+   ============================================================ */
+.bd-frames { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.frame {
+  position: relative;             /* anchor for the guides */
+  overflow: hidden;               /* MANDATORY: the guides can never escape */
+  min-height: 150px; border: 1.5px solid var(--border-default); border-radius: var(--radius-md);
+  background: repeating-linear-gradient(45deg, var(--paper-000), var(--paper-000) 12px,
+    var(--paper-100) 12px, var(--paper-100) 24px);
+  display: flex; align-items: flex-end; padding: 10px;
+}
+.frame.sm { min-height: 110px; }
+.frame__cap { position: relative; z-index: 2; font-family: var(--font-mono); font-size: 0.6875rem;
+  color: var(--text-faint); }
+/* The guides are insets OF the frame, only while safe-on is set. Sizing them to
+   the frame keeps them visible inside it; `overflow: hidden` above is the hard
+   guarantee if a crew ever swaps in a fixed-pixel overlay. */
+.safe-on .frame::before,
+.safe-on .frame::after {
+  content: ""; position: absolute; border-radius: var(--radius-sm); pointer-events: none;
+}
+.safe-on .frame::before { inset: 10%; border: 1px dashed rgba(192, 69, 42, 0.9); }
+.safe-on .frame::after { inset: 3%; border: 1px dotted rgba(47, 102, 136, 0.8); }
+/* small frames tune their insets - the modifier class goes ON the frame */
+.safe-on .frame.sm::before { inset: 18%; }
+.safe-on .frame.sm::after { inset: 7%; }
+
+/* ---- single choice: radios + a Queue answer button ---- */
+.bd-opts { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.bd-opt { display: flex; align-items: flex-start; gap: 10px; padding: 10px 13px; cursor: pointer;
+  background: var(--surface-warm); border: 1.5px solid var(--border-default); border-radius: var(--radius-sm);
+  transition: border-color 120ms, background 120ms; }
+.bd-opt:hover { border-color: var(--ink-300); }
+.bd-opt input { accent-color: var(--rust-500); margin-top: 3px; flex: none; }
+.bd-opt:has(input:checked) { border-color: var(--rust-500); background: var(--rust-050);
+  box-shadow: inset 0 0 0 1px var(--rust-500); }
+.bd-opt__body { min-width: 0; }
+.bd-opt__label { display: block; font-size: 0.9375rem; font-weight: 700; color: var(--text-strong); }
+.bd-opt__hint { display: block; font-size: 0.8125rem; color: var(--text-muted); }
+
+/* ---- multi-pick: checkbox rows + a bottom dispatch bar ---- */
+.bd-picks { display: flex; flex-direction: column; margin-top: 4px; }
+.bd-pickrow { display: flex; align-items: center; gap: 12px; padding: 11px 4px;
+  border-top: 1px solid var(--border-soft); cursor: pointer; }
+.bd-pickrow:first-child { border-top: none; }
+.bd-pick { accent-color: var(--rust-500); width: 16px; height: 16px; flex: none; margin: 0; cursor: pointer; }
+.bd-pickrow__title { font-size: 0.9375rem; font-weight: 700; color: var(--text-strong); }
+.bd-pickrow__sub { font-size: 0.8125rem; color: var(--text-muted); }
+.bd-dispatch { display: flex; align-items: center; gap: 12px; margin: 6px -22px -20px; padding: 12px 22px;
+  border-top: 1.5px solid var(--border-default); background: var(--paper-100);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.bd-dispatch[hidden] { display: none; }
+.bd-dispatch__count { flex: 1 1 auto; font-size: 0.75rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-muted); }
+
+/* ---- buttons and the queued chip ---- */
+.bd-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.bd-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;
+  font-family: var(--font-sans); font-weight: 800; font-size: 0.8125rem; line-height: 1;
+  padding: 9px 16px; border: 2px solid var(--ink-900); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-hard-sm); transition: background 120ms, transform 120ms; }
+.bd-btn:active { transform: translateY(1px); }
+.bd-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--gold-300); }
+.bd-btn--primary { background: var(--rust-500); color: var(--white); }
+.bd-btn--primary:hover { background: var(--rust-600); }
+.bd-btn--gold { background: var(--gold-500); color: var(--ink-900); }
+.bd-btn--gold:hover { background: var(--gold-600); }
+.bd-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+.bd-queued { display: none; align-items: center; gap: 6px; font-size: 0.6875rem; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--sea-700); background: var(--sea-050);
+  border: 1.5px solid var(--sea-200); border-radius: var(--radius-sm); padding: 5px 9px; }
+.bd-queued::before { content: "\2713"; }
+.is-queued .bd-queued { display: inline-flex; }
+
+.bd-footer { border-top: 1px solid var(--border-default); padding-top: 14px;
+  font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-faint); }
+
+@media (max-width: 720px) { .bd-frames { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="bd-nav">
+  <div class="bd-nav__inner">
+    <span class="bd-brand">
+      <span class="bd-brand__disc" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 21h18"/><path d="M6 21V9l6-5 6 5v12"/><path d="M10 21v-6h4v6"/>
+        </svg>
+      </span>
+      foreman
+    </span>
+    <!-- The safe-margin guides are a review aid, off by default. `.frame`
+         clips them unconditionally, so an overlay can never leave its frame. -->
+    <label class="bd-toggle"><input type="checkbox" id="safe-toggle" /> Show safe margins</label>
+  </div>
+</header>
+
+<main class="bd-main">
+
+  <!-- REPLACE: the title and lede for your board. -->
+  <section class="bd-card bd-card--stack">
+    <span class="bd-eyebrow">Review board</span>
+    <h1 style="font-family: var(--font-display); font-size: 1.7rem;">&lt;What this board is for&gt;</h1>
+    <p class="bd-lede">One or two sentences: what you built, and what you want the captain
+      to decide. Queue your answers, then press the composer's red <strong>Send &amp; End</strong>.</p>
+  </section>
+
+  <!-- REPLACE: the visual evidence. `.frame` clips its guides; keep the class. -->
+  <section class="bd-card bd-card--stack">
+    <span class="bd-eyebrow">The evidence</span>
+    <h2>&lt;What the captain is looking at&gt;</h2>
+    <div class="bd-frames">
+      <div class="frame"><span class="frame__cap">full frame &middot; safe area</span></div>
+      <div class="frame"><span class="frame__cap">full frame &middot; safe area</span></div>
+      <div class="frame sm"><span class="frame__cap">small frame &middot; scaled insets</span></div>
+      <div class="frame sm"><span class="frame__cap">small frame &middot; scaled insets</span></div>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       SINGLE CHOICE. One `<form data-lavish-question="…">` per question.
+       `queuePrompt` fires from the submit handler only; `change` does nothing.
+       ===================================================================== -->
+  <section class="bd-card bd-card--stack">
+    <span class="bd-eyebrow">The call</span>
+    <h2>&lt;The one question that needs a direction&gt;</h2>
+    <p class="bd-lede">Pick one, then queue your answer.</p>
+    <form data-lavish-question="direction" data-question-title="Direction">
+      <div class="bd-opts">
+        <label class="bd-opt">
+          <input type="radio" name="answer" value="A" />
+          <span class="bd-opt__body">
+            <span class="bd-opt__label">A — &lt;first option&gt;</span>
+            <span class="bd-opt__hint">&lt;what choosing it commits us to&gt;</span>
+          </span>
+        </label>
+        <label class="bd-opt">
+          <input type="radio" name="answer" value="B" />
+          <span class="bd-opt__body">
+            <span class="bd-opt__label">B — &lt;second option&gt;</span>
+            <span class="bd-opt__hint">&lt;its trade-off&gt;</span>
+          </span>
+        </label>
+        <label class="bd-opt">
+          <input type="radio" name="answer" value="C" />
+          <span class="bd-opt__body">
+            <span class="bd-opt__label">C — &lt;third option&gt;</span>
+            <span class="bd-opt__hint">&lt;its trade-off&gt;</span>
+          </span>
+        </label>
+      </div>
+      <div class="bd-foot">
+        <button type="submit" class="bd-btn bd-btn--primary">Queue answer</button>
+        <span class="bd-queued">queued</span>
+      </div>
+    </form>
+  </section>
+
+  <!-- =====================================================================
+       MULTI-PICK. Checkbox rows; the dispatch bar appears once there is
+       something pickable. The button queues every pick in ONE queuePrompt.
+       ===================================================================== -->
+  <section class="bd-card bd-card--stack">
+    <span class="bd-eyebrow">The shortlist</span>
+    <h2>&lt;Which of these should we dispatch?&gt;</h2>
+    <p class="bd-lede">Tick any that should go out, then queue one dispatch order.</p>
+    <div class="bd-picks" id="picks">
+      <label class="bd-pickrow">
+        <input type="checkbox" class="bd-pick" value="item-1" />
+        <span><span class="bd-pickrow__title">&lt;First item&gt;</span>
+          <span class="bd-pickrow__sub">&lt;why it is on the list&gt;</span></span>
+      </label>
+      <label class="bd-pickrow">
+        <input type="checkbox" class="bd-pick" value="item-2" />
+        <span><span class="bd-pickrow__title">&lt;Second item&gt;</span>
+          <span class="bd-pickrow__sub">&lt;why it is on the list&gt;</span></span>
+      </label>
+      <label class="bd-pickrow">
+        <input type="checkbox" class="bd-pick" value="item-3" />
+        <span><span class="bd-pickrow__title">&lt;Third item&gt;</span>
+          <span class="bd-pickrow__sub">&lt;why it is on the list&gt;</span></span>
+      </label>
+    </div>
+    <div class="bd-dispatch" id="dispatch" hidden>
+      <span class="bd-dispatch__count" id="dispatch-count">pick work to dispatch</span>
+      <span class="bd-queued">queued</span>
+      <button type="button" class="bd-btn bd-btn--gold" id="dispatch-btn">Queue dispatch order</button>
+    </div>
+  </section>
+
+  <footer class="bd-footer">foreman board-template &middot; replace the sample content, keep the two forms wired</footer>
+
+</main>
+
+<script>
+/* ============================================================
+   The queueing contract, in one place.
+
+   `queuePrompt` is called EXACTLY ONCE per question, from the explicit
+   submit/dispatch action. It is NEVER called from a radio's or checkbox's
+   `change` event: that would file an answer the captain has not sent, and the
+   queue lives in this browser tab until the composer's "Send & End" submits it.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  function queuePrompt(text, options) {
+    if (window.lavish && typeof window.lavish.queuePrompt === "function") {
+      window.lavish.queuePrompt(text, options);
+    }
+  }
+  function controlsChangedOnly() { /* local state only - never queue here */ }
+
+  /* ---- single choice: radios + a Queue answer button ---- */
+  Array.prototype.forEach.call(document.querySelectorAll("form[data-lavish-question]"), function (form) {
+    form.addEventListener("change", controlsChangedOnly);
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var key = form.getAttribute("data-lavish-question");
+      var title = form.getAttribute("data-question-title") || key;
+      var value = new FormData(form).get("answer");
+      if (!value) return;
+      var chosen = form.querySelector('input[name="answer"]:checked');
+      var label = chosen ? (chosen.closest(".bd-opt").querySelector(".bd-opt__label").textContent || value) : value;
+      queuePrompt("Answer \u2014 " + title + ": " + label, {
+        tag: "choice",
+        text: title + " \u2192 " + label,
+        element: form,
+        data: { question: key, answer: value }
+      });
+      form.classList.add("is-queued");
+    });
+  });
+
+  /* ---- multi-pick: the dispatch bar appears once something is pickable ---- */
+  var picks = document.getElementById("picks");
+  var bar = document.getElementById("dispatch");
+  var barCount = document.getElementById("dispatch-count");
+  var barBtn = document.getElementById("dispatch-btn");
+  function picked() {
+    return Array.prototype.map.call(picks.querySelectorAll(".bd-pick:checked"), function (c) { return c.value; });
+  }
+  function refresh() {
+    var ids = picked();
+    barCount.textContent = ids.length ? ids.length + " picked for dispatch" : "pick work to dispatch";
+    barBtn.disabled = !ids.length;
+  }
+  if (picks && bar && barBtn) {
+    bar.hidden = picks.querySelectorAll(".bd-pick").length === 0; /* hidden until pickable */
+    refresh();
+    picks.addEventListener("change", refresh); /* state only - never queue */
+    barBtn.addEventListener("click", function () {
+      var ids = picked();
+      if (!ids.length) return;
+      queuePrompt("Dispatch \u2014 start this queued work now: " + ids.join(", "), {
+        tag: "choice",
+        text: "Dispatch: " + ids.join(", "),
+        element: bar,
+        queueKey: "dispatch.picked",
+        data: { question: "dispatch.picked", answer: ids.join(",") }
+      });
+      bar.classList.add("is-queued");
+    });
+  }
+
+  /* ---- safe-margin toggle: it only flips a class on <body> ---- */
+  var toggle = document.getElementById("safe-toggle");
+  if (toggle) {
+    toggle.addEventListener("change", function () {
+      document.body.classList.toggle("safe-on", toggle.checked);
+    });
+  }
+})();
+</script>
+</body>
+</html>
