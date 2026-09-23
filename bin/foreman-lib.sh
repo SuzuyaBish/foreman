@@ -399,6 +399,61 @@ foreman_open_decisions() {
   done
 }
 
+# --- todo lookup and announcements ------------------------------------------
+#
+# The todo list is the durable plan (bin/crew-todo.sh). A crew linked to an item
+# is announced by that item's number and title, not by its own id, so a wake
+# says which piece of work it is. One resolver here, so the watcher and any other
+# announcer never re-read the file by hand.
+
+foreman_todo_item_of_crew() { # <crew-id> -> "<seq>\t<title>", or nothing
+  local todo="$FOREMAN_HOME/todo.tsv"
+  [ -n "${1:-}" ] && [ "$1" != "-" ] || return 0
+  [ -f "$todo" ] || return 0
+  # The last row naming the crew wins, so a reassigned item is the current one.
+  awk -F'\t' -v c="$1" '$3 == c { seq = $1; title = $4 } END {
+    if (seq != "") printf "%s\t%s", seq, title
+  }' "$todo"
+}
+
+# Shorten text to at most <max> characters, ending in an ellipsis, so an
+# announcement stays one bounded line without dropping what identifies it.
+foreman_ellipsize() { # <max> <text>
+  local max=${1:-} text=${2:-}
+  case "$max" in '' | *[!0-9]*) printf '%s' "$text"; return 0 ;; esac
+  if [ "${#text}" -le "$max" ]; then
+    printf '%s' "$text"
+  else
+    printf '%s…' "${text:0:$((max - 1))}"
+  fi
+}
+
+# How a crew's state change is announced in a wake row. A review is a delivery,
+# so it carries the work's identity — the linked todo item's number and title,
+# then the pull request — instead of only the crew id. Without a linked item it
+# falls back to "<id> review", exactly as it always read.
+foreman_transition_payload() { # <id> <state>
+  local id=$1 state=$2 info seq title pr
+  if [ "$state" != review ]; then
+    printf '%s %s' "$id" "$state"
+    return 0
+  fi
+  info=$(foreman_todo_item_of_crew "$id")
+  if [ -z "$info" ]; then
+    printf '%s review' "$id"
+    return 0
+  fi
+  seq=${info%%$'\t'*}
+  title=${info#*$'\t'}
+  pr=$(foreman_meta_get "$id" pr 2>/dev/null) || pr=
+  title=$(foreman_ellipsize 80 "$title")
+  if [ -n "$pr" ]; then
+    printf '#%s %s — PR ready: %s' "$seq" "$title" "$pr"
+  else
+    printf '#%s %s — PR ready' "$seq" "$title"
+  fi
+}
+
 # --- wake queue: durable, sequenced, acknowledged by sequence ---------------
 
 foreman_queue_path() { printf '%s/.wake-queue' "$FOREMAN_HOME"; }

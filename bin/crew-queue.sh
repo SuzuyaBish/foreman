@@ -8,7 +8,9 @@
 #
 # Rows are appended before anything is announced and acknowledged by sequence,
 # so a wake survives a foreman crash, a session replacement, or an extension
-# reload. A row carries state and identifiers only — never crew output.
+# reload. A row carries state and identifiers only — never crew output. (A
+# review row also carries the linked todo item's number and title: the work's
+# identity, which the foreman reads to know what the PR is for.)
 set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"

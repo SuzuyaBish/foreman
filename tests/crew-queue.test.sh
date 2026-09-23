@@ -57,6 +57,32 @@ test_ack_and_clear() {
   pass "acknowledging and clearing are explicit"
 }
 
+# A review row now carries the work's identity (todo number and title, then the
+# PR) instead of only the crew id. The payload is opaque to the queue: sequences
+# and the ack cursor must behave exactly as before.
+test_ack_protocol_is_unchanged_by_review_payloads() {
+  local out payload url
+  url="https://example.test/o/r/pull/24"
+  payload="#24 Crew board: the status line and the widget disagree — PR ready: $url"
+  "$QUEUE" clear >/dev/null
+  "$QUEUE" append state "t1 review" >/dev/null
+  "$QUEUE" append state "$payload" >/dev/null
+
+  out=$("$QUEUE" list)
+  assert_contains "$out" "$payload" "a review row is listed verbatim"
+  assert_contains "$out" "ack-through 2" "the ack cursor still names the last row"
+
+  out=$("$QUEUE" ack 1)
+  assert_equals "acked through 1" "$out" "ack reports the cursor"
+  assert_equals "1" "$("$QUEUE" count)" "only the review row is left"
+  assert_contains "$("$QUEUE" list)" "$payload" "the review row survives an earlier ack"
+
+  "$QUEUE" ack 2 >/dev/null
+  assert_equals "no pending wakes" "$("$QUEUE" list)" "acking the review row drains the queue"
+  pass "review payloads do not disturb the sequence or ack protocol"
+}
+
 test_append_and_list
 test_kind_and_payload_validation
 test_ack_and_clear
+test_ack_protocol_is_unchanged_by_review_payloads

@@ -8,6 +8,7 @@
 #        crew-todo.sh done <seq>
 #        crew-todo.sh open <seq>
 #        crew-todo.sh drop <seq>
+#        crew-todo.sh item <crew-id>
 #        crew-todo.sh focus [<scope>|--clear]
 #        crew-todo.sh sync
 #        crew-todo.sh summary [--all|--project <scope>]
@@ -244,6 +245,12 @@ done | open | drop)
   rmdir "$lock" 2>/dev/null || true
   printf '#%s %s\n' "$SEQ" "$STATUS"
   ;;
+item)
+  # Resolve a crew to the item linked to it, so an announcement can name the
+  # work instead of the crew. Reading never creates the list.
+  foreman_todo_item_of_crew "${2:-}"
+  printf '\n'
+  ;;
 focus)
   todo_init
   SCOPE=${2:-}
@@ -434,6 +441,6 @@ list)
   ' "$TODO"
   ;;
 *)
-  foreman_die "usage: crew-todo.sh add|note|list|start|done|open|drop|sync|summary"
+  foreman_die "usage: crew-todo.sh add|note|list|start|done|open|drop|item|sync|summary"
   ;;
 esac

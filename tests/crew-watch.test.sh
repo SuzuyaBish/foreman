@@ -29,6 +29,10 @@ wait_for_exit() {
   return 0
 }
 
+# Add a todo item and print its sequence, so a test never hard-codes a number an
+# earlier test has already advanced.
+add_item() { "$BIN/crew-todo.sh" add "$@" | sed -n 's/^added #\([0-9][0-9]*\).*/\1/p'; }
+
 test_a_state_change_wakes_the_foreman() {
   fm_task w1 working >/dev/null
   fm_attach_pane w1 >/dev/null
@@ -48,6 +52,90 @@ test_a_state_change_wakes_the_foreman() {
   assert_contains "$(cat "$OUT")" "crew wake: w1 review" "the wake line names the task and new state"
   assert_contains "$("$BIN/crew-queue.sh" list)" "w1 review" "a durable wake row was appended"
   pass "a state change produces one durable wake row and one line"
+}
+
+test_a_review_names_the_linked_item_and_pr() {
+  local seq out
+  fm_task w3 working >/dev/null
+  fm_attach_pane w3 >/dev/null
+  seq=$(add_item "Crew board: the status line and the widget disagree")
+  "$BIN/crew-todo.sh" start "$seq" w3 >/dev/null
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  local pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" w3 review "ready for review" --pr "https://example.test/o/r/pull/7" >/dev/null
+
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake on a linked review"
+  }
+  wait "$pid"
+
+  out=$("$BIN/crew-queue.sh" list)
+  assert_contains "$out" \
+    "#$seq Crew board: the status line and the widget disagree — PR ready: https://example.test/o/r/pull/7" \
+    "the durable wake row names the linked item's number and title, and the PR"
+  assert_contains "$(cat "$OUT")" \
+    "crew wake: #$seq Crew board: the status line and the widget disagree — PR ready: https://example.test/o/r/pull/7" \
+    "the one-line wake names the work too"
+  pass "a review transition announces the linked work, not just the crew id"
+}
+
+test_a_review_without_a_linked_item_names_the_crew() {
+  fm_task w4 working >/dev/null
+  fm_attach_pane w4 >/dev/null
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  local pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" w4 review "ready" --pr "https://example.test/o/r/pull/8" >/dev/null
+
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake on an unlinked review"
+  }
+  wait "$pid"
+
+  assert_contains "$("$BIN/crew-queue.sh" list)" "w4 review" \
+    "an unlinked crew keeps today's wake row, PR or not"
+  pass "a crew with no linked item still names the crew"
+}
+
+test_an_overlong_title_stays_one_line() {
+  local seq long row payload
+  fm_task w5 working >/dev/null
+  fm_attach_pane w5 >/dev/null
+  long=$(printf 'a long todo title %.0s' {1..30})
+  seq=$(add_item "$long")
+  "$BIN/crew-todo.sh" start "$seq" w5 >/dev/null
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  local pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" w5 review "ready" --pr "https://example.test/o/r/pull/9" >/dev/null
+
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake on an overlong-title review"
+  }
+  wait "$pid"
+
+  # A row is one physical TSV line of four fields; the payload can neither smuggle
+  # in a tab nor push the announcement onto a second line.
+  row=$(awk -F'\t' -v s="$seq" '$4 ~ ("^#" s " ") { print }' "$FOREMAN_HOME/.wake-queue")
+  [ -n "$row" ] || fail "no review row for #$seq"
+  assert_equals "4" "$(printf '%s\n' "$row" | awk -F'\t' '{ print NF }')" \
+    "the wake row is exactly four fields with no embedded tab"
+  assert_equals "1" "$(wc -l <"$OUT" | tr -d ' ')" "the wake is one line"
+  payload=$(printf '%s\n' "$row" | cut -f4)
+  assert_contains "$payload" "#$seq " "the number survives ellipsizing"
+  assert_contains "$payload" "https://example.test/o/r/pull/9" "the URL survives ellipsizing"
+  assert_contains "$payload" "…" "an overlong title is ellipsized"
+  pass "an overlong title is ellipsized, never dropped for the number or URL"
 }
 
 test_a_lost_endpoint_wakes_the_foreman() {
@@ -92,5 +180,8 @@ test_an_unacknowledged_steer_escalates() {
 }
 
 test_a_state_change_wakes_the_foreman
+test_a_review_names_the_linked_item_and_pr
+test_a_review_without_a_linked_item_names_the_crew
+test_an_overlong_title_stays_one_line
 test_a_lost_endpoint_wakes_the_foreman
 test_an_unacknowledged_steer_escalates

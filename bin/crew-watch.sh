@@ -13,7 +13,9 @@
 #   * a crew that is unfinished and has made no progress past the stall bound;
 #   * (once per run, at start) a task whose pane is gone while unfinished.
 #
-# Rows carry state and identifiers only. Crew output never reaches them.
+# Rows carry state and identifiers only. Crew output never reaches them; a
+# review row adds the linked todo item's number and title so the wake says which
+# piece of work is ready, not only which crew.
 set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/foreman-lib.sh"
@@ -159,9 +161,12 @@ while :; do
     [ "$was" != "$state" ] || continue
     case "$ATTENTION" in *" $state "*) ;; *) continue ;; esac
     count=$((count + 1))
-    foreman_queue_append state "$id $state" >/dev/null || true
+    # A review carries the work's identity (todo number and title, then the PR),
+    # not just the crew id; every other transition is unchanged.
+    payload=$(foreman_transition_payload "$id" "$state")
+    foreman_queue_append state "$payload" >/dev/null || true
     if [ "$count" -le 3 ]; then
-      hits="${hits}${hits:+, }$id $state"
+      hits="${hits}${hits:+, }$payload"
     fi
   done <<EOF
 $cur
