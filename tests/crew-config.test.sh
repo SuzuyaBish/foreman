@@ -44,6 +44,10 @@ test_booleans_are_json_booleans() {
 
   "$CONFIG" set crewIsolate 1 >/dev/null
   assert_equals "true" "$("$CONFIG" get crewIsolate)" "1 is accepted as true"
+
+  "$CONFIG" set crewCalm on >/dev/null
+  assert_equals "true" "$("$CONFIG" get crewCalm)" "crewCalm is a boolean, as /crew calm writes it"
+  assert_equals "true" "$(jq -r '.crewCalm | tostring' "$FOREMAN_HOME/config.json")" "the calm choice lands in the config the extension reads"
   pass "booleans are coerced at the boundary"
 }
 

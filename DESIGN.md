@@ -474,6 +474,28 @@ records. It is sent with `triggerTurn: false` and `display: false`: the model
 opens oriented without spending a turn, and the captain's transcript stays
 clean. Nothing here reads a pane or a report.
 
+### Calm mode
+
+Calm mode (`crewCalm`, `/crew calm on|off`) hides the foreman's own tool calls —
+the call line, its arguments and its output — so the captain reads only the
+responses. It is a display preference, not a context change: the tools still run
+and their results still reach the model. The status line, the widget, the wake
+message and the assistant responses are deliberately untouched.
+
+It rides on the only rendering hook pi exposes to an extension: `renderCall`,
+`renderResult` and `renderShell` on a tool definition. There is no global
+"hide tool calls" switch, so an extension can quiet only tools it defines.
+Calm wraps the extension's own tools directly, and re-registers pi's built-in
+tools (`create*ToolDefinition` returns the whole definition — schema, execute
+and renderers — so only the drawing changes). A row's renderers consult the live
+`calmEnabled` flag at render time, so toggling redraws the calls already on
+screen. The extension's own rows use `renderShell: "self"` and draw the padded,
+backgrounded block themselves: that is what lets a quiet row render *zero*
+lines, where the default shell would still leave a blank spacer behind an empty
+box. A hidden built-in keeps its own shell, so it leaves one blank spacer line
+rather than nothing — the mechanism pi exposes draws a tool's *content*, not the
+row that holds it.
+
 ## Tests
 
 The suite (`bin/crew-test.sh`, `tests/`) is the regression check for the
