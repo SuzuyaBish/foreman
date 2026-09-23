@@ -140,6 +140,64 @@ sweep_endpoints() {
   done
 }
 
+# Is the terminal a finished crew was given still there? Something may have
+# closed it already -- a merge closes the home of the crew it settles -- and a
+# home that is gone must be marked settled, never closed or announced again.
+home_live() { # <id> <own-workspace> <pane>
+  local id=$1 ws=$2 pane=$3
+  if [ -n "$ws" ] && foreman_herdr workspace get "$ws" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -n "$pane" ] && foreman_pane_of "$id" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+# A crew that has reached done or failed owes nothing further, so its terminal
+# must not sit idle until somebody archives it. Close the home the foreman made
+# for it -- workspace, else tab -- exactly as a successful merge does, and print
+# one "<id>\t<note>" per release for the wake line. Only the terminal goes: the
+# record, the branch and the worktree all survive. Best effort throughout, like
+# merge and archive: Herdr absent is a warning, never a failure, and a home that
+# is already gone is a silent no-op. The .home-closed marker is what makes it
+# once: a settled task is not retried and not announced again.
+sweep_finished_homes() {
+  local id dir state ws tab pane marker note
+  for id in $(foreman_task_ids); do
+    state=$(foreman_status_get "$id" state)
+    case "$state" in done | failed) ;; *) continue ;; esac
+    dir=$(foreman_task_dir "$id")
+    marker="$dir/.home-closed"
+    [ -f "$marker" ] && continue
+    ws=$(foreman_own_workspace "$id")
+    tab=$(foreman_meta_get "$id" tab 2>/dev/null || printf '')
+    pane=$(foreman_meta_get "$id" pane 2>/dev/null || printf '')
+    if [ -z "$ws" ] && [ -z "$tab" ] && [ -z "$pane" ]; then
+      # Nothing was ever recorded as a home; settle it silently.
+      : >"$marker"
+      continue
+    fi
+    if ! command -v herdr >/dev/null 2>&1; then
+      printf '%s\t%s\n' "$id" "could not close its terminal (herdr is not on PATH)"
+      continue
+    fi
+    if ! home_live "$id" "$ws" "$pane"; then
+      # A merge, or an earlier watch run, already closed it: settle without a
+      # second close or a second announcement.
+      : >"$marker"
+      continue
+    fi
+    case "$(foreman_close_home "$id")" in
+    workspace) note="closed its workspace" ;;
+    tab) note="closed its tab" ;;
+    *) note="nothing was left to close" ;;
+    esac
+    : >"$marker"
+    printf '%s\t%s\n' "$id" "$note"
+  done
+}
+
 sweep_endpoints
 poll_prs
 service_steers
@@ -152,9 +210,11 @@ while :; do
   sweep_endpoints
   cur=$(snapshot)
   stalled=$(check_stalls)
+  finished=$(sweep_finished_homes)
 
   hits=""
   count=0
+  settled=" "
   while IFS='=' read -r id state; do
     [ -n "$id" ] || continue
     was=$(printf '%s\n' "$prev" | sed -n "s/^$id=//p" | head -1)
@@ -164,6 +224,13 @@ while :; do
     # A review carries the work's identity (todo number and title, then the PR),
     # not just the crew id; every other transition is unchanged.
     payload=$(foreman_transition_payload "$id" "$state")
+    # A crew that has just finished released its terminal too, and that note
+    # rides the same row, so one line says both what happened and what it left.
+    fnote=$(printf '%s\n' "$finished" | awk -F'\t' -v i="$id" '$1 == i { print $2; exit }')
+    if [ -n "$fnote" ]; then
+      payload="$payload — $fnote"
+      settled="$settled$id "
+    fi
     foreman_queue_append state "$payload" >/dev/null || true
     if [ "$count" -le 3 ]; then
       hits="${hits}${hits:+, }$payload"
@@ -178,6 +245,22 @@ EOF
       hits="${hits}${hits:+, }$id stalled"
     fi
   done
+
+  # A finished crew the watcher meets already settled -- it restarted after the
+  # crew reported, or a merge closed the home before this run -- still gets its
+  # release announced, once, on a row of its own.
+  while IFS=$'\t' read -r id fnote; do
+    [ -n "$id" ] || continue
+    case "$settled" in *" $id "*) continue ;; esac
+    count=$((count + 1))
+    entry="$id finished — $fnote"
+    foreman_queue_append state "$entry" >/dev/null || true
+    if [ "$count" -le 3 ]; then
+      hits="${hits}${hits:+, }$entry"
+    fi
+  done <<EOF
+$finished
+EOF
 
   if [ "$count" -gt 0 ]; then
     [ "$count" -le 3 ] || hits="$hits and $((count - 3)) more"

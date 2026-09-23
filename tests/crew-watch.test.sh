@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1010  # "done" is a subcommand argument here, not a loop terminator.
 # crew-watch.test.sh - the one-shot watcher, and the wake rows it produces.
 #
 # The watcher is the only producer of wake rows. It blocks until there is news,
@@ -32,6 +33,42 @@ wait_for_exit() {
 # Add a todo item and print its sequence, so a test never hard-codes a number an
 # earlier test has already advanced.
 add_item() { "$BIN/crew-todo.sh" add "$@" | sed -n 's/^added #\([0-9][0-9]*\).*/\1/p'; }
+
+# attach_home <id>: record the workspace and tab this foreman created for a crew,
+# with its pane registered there, exactly as a launch leaves it. Prints the pane.
+attach_home() { # <id>
+  local id=$1 out ws tab pane
+  fm_herdr_seed_workspace ws-parent skills
+  out=$(herdr --session "${FOREMAN_SESSION:-default}" workspace create \
+    --label "└ $id" --cwd /tmp --no-focus)
+  ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
+  tab=$(printf '%s' "$out" | jq -r '.result.tab.tab_id')
+  pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
+  {
+    printf 'workspace=%s\nparent_workspace=ws-parent\n' "$ws"
+    printf 'tab=%s\npane=%s:%s\n' "$tab" "${FOREMAN_SESSION:-default}" "$pane"
+  } >>"$FOREMAN_HOME/tasks/$id/meta"
+  printf '%s\n' "$pane"
+}
+
+# attach_home_lost_pane <id>: a home whose pane the crew already lost, so the
+# endpoint sweep leaves the task alone and the finished-home sweep is exercised
+# on its own. Prints the workspace id.
+attach_home_lost_pane() { # <id>
+  local id=$1 out ws tab
+  fm_herdr_seed_workspace ws-parent skills
+  out=$(herdr --session "${FOREMAN_SESSION:-default}" workspace create \
+    --label "└ $id" --cwd /tmp --no-focus)
+  ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
+  tab=$(printf '%s' "$out" | jq -r '.result.tab.tab_id')
+  {
+    printf 'workspace=%s\nparent_workspace=ws-parent\n' "$ws"
+    printf 'tab=%s\n' "$tab"
+  } >>"$FOREMAN_HOME/tasks/$id/meta"
+  printf '%s\n' "$ws"
+}
+
+workspace_of() { sed -n 's/^workspace=//p' "$FOREMAN_HOME/tasks/$1/meta" | head -1; }
 
 test_a_state_change_wakes_the_foreman() {
   fm_task w1 working >/dev/null
@@ -179,6 +216,179 @@ test_an_unacknowledged_steer_escalates() {
   pass "a swallowed doorbell becomes a visible fact"
 }
 
+# test_a_finished_crew_releases_its_home_once: a crew that reports done owes
+# nothing more, so its terminal closes -- exactly as a merge closes one -- and
+# the close shows up in the wake line. The record, branch and worktree stay.
+test_a_finished_crew_releases_its_home_once() {
+  local pane ws pid rows_before rows_after
+  fm_task d1 working >/dev/null
+  pane=$(attach_home d1)
+  ws=$(workspace_of d1)
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" d1 done "report delivered" >/dev/null
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake when a crew reported done"
+  }
+  wait "$pid"
+
+  assert_contains "$(cat "$OUT")" "closed its workspace" "the wake line reports the release"
+  assert_absent "$HERDR_STUB_STATE/pane-$pane" "the idle terminal is gone"
+  assert_equals "1" "$(grep -c "workspace close $ws" "$HERDR_STUB_STATE/calls")" \
+    "the home is closed exactly once"
+  assert_present "$FOREMAN_HOME/tasks/d1" "the record survives the release"
+  assert_absent "$FOREMAN_HOME/archive/d1" "a finished crew is never archived"
+  assert_contains "$("$BIN/crew-queue.sh" list)" "d1 done" "the finish is on the durable board"
+  assert_contains "$("$BIN/crew-queue.sh" list)" "closed its workspace" "the release is visible too"
+
+  # Meeting the same settled task again must not re-close or re-announce it.
+  rows_before=$("$BIN/crew-queue.sh" count)
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 2.5
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  rows_after=$("$BIN/crew-queue.sh" count)
+  assert_equals "$rows_before" "$rows_after" "a settled release is not announced again"
+  assert_equals "1" "$(grep -c "workspace close $ws" "$HERDR_STUB_STATE/calls")" \
+    "the home is not closed twice"
+  pass "a finished crew releases its terminal once, and only its terminal"
+}
+
+# test_a_failed_crew_releases_its_home: failed is the other half of "nothing is
+# owed", so its terminal closes too.
+test_a_failed_crew_releases_its_home() {
+  local pane ws pid
+  fm_task f1 working >/dev/null
+  pane=$(attach_home f1)
+  ws=$(workspace_of f1)
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" f1 failed "cannot be completed" >/dev/null
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake when a crew failed"
+  }
+  wait "$pid"
+
+  assert_contains "$(cat "$OUT")" "closed its workspace" "a failed crew's terminal is released too"
+  assert_absent "$HERDR_STUB_STATE/pane-$pane" "the failed crew's pane is gone"
+  assert_contains "$(fm_herdr_calls)" "workspace close $ws" "the failed crew's home was closed"
+  assert_present "$FOREMAN_HOME/tasks/f1" "the failed record survives"
+  pass "a failed crew does not hold a terminal either"
+}
+
+# test_a_blocked_crew_keeps_its_home: a decision is still owed, so the pane it
+# is waiting in must stay.
+test_a_blocked_crew_keeps_its_home() {
+  local pane pid
+  fm_task b1 working >/dev/null
+  pane=$(attach_home b1)
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" b1 blocked "waiting on the captain" >/dev/null
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake when a crew blocked"
+  }
+  wait "$pid"
+
+  assert_contains "$(cat "$OUT")" "b1 blocked" "a blocked crew still wakes the foreman"
+  assert_present "$HERDR_STUB_STATE/pane-$pane" "the pane a blocked crew needs survives"
+  pass "a crew waiting on a decision holds its terminal"
+}
+
+# test_a_review_crew_keeps_its_home: a merge is owed, so the pane stays too.
+test_a_review_crew_keeps_its_home() {
+  local pane pid
+  fm_task r1 working >/dev/null
+  pane=$(attach_home r1)
+
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" r1 review "ready" --pr "https://example.test/o/r/pull/11" >/dev/null
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake on a review"
+  }
+  wait "$pid"
+
+  assert_contains "$(cat "$OUT")" "r1 review" "a review still wakes the foreman"
+  assert_present "$HERDR_STUB_STATE/pane-$pane" "the pane a review crew waits in survives"
+  pass "a crew waiting on a merge holds its terminal"
+}
+
+# test_a_working_crew_is_left_alone: nothing is owed yet, so the watcher neither
+# closes nor announces anything.
+test_a_working_crew_is_left_alone() {
+  local pane pid rows_before rows_after
+  fm_task g1 working >/dev/null
+  pane=$(attach_home g1)
+
+  rows_before=$("$BIN/crew-queue.sh" count)
+  : >"$OUT"
+  "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 2.5
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+
+  rows_after=$("$BIN/crew-queue.sh" count)
+  assert_present "$HERDR_STUB_STATE/pane-$pane" "a working crew keeps its terminal"
+  assert_equals "$rows_before" "$rows_after" "a working crew produces no release wake"
+  pass "a crew still on the job is untouched"
+}
+
+# test_an_unreachable_herdr_warns_and_changes_nothing: the release is best
+# effort, like merge and archive. A Herdr that is not there is a warning; the
+# task stays done and the home is not invented as closed. The crew here has lost
+# its pane, so the endpoint sweep leaves it and the release sweep is isolated.
+test_an_unreachable_herdr_warns_and_changes_nothing() {
+  local ws pid sans_herdr
+  fm_task h1 working >/dev/null
+  ws=$(attach_home_lost_pane h1)
+
+  # Build the herdr-less PATH before launching, so the watcher reaches its loop
+  # before the report and the transition is what it observes.
+  sans_herdr=$(fm_path_without herdr)
+  : >"$OUT"
+  PATH="$sans_herdr" "$WATCH" >"$OUT" 2>&1 &
+  pid=$!
+  sleep 1.5
+  "$BIN/crew-report.sh" h1 done "finished" >/dev/null
+  wait_for_exit "$pid" 20 || {
+    kill "$pid" 2>/dev/null
+    fail "the watcher did not wake with Herdr unreachable"
+  }
+  wait "$pid"
+
+  assert_contains "$(cat "$OUT")" "could not close its terminal" "the failed release is a warning"
+  assert_equals "done" "$(sed -n 's/^state=//p' "$FOREMAN_HOME/tasks/h1/status")" "the task stays done"
+  assert_contains "$(cat "$HERDR_STUB_STATE/workspaces")" "$ws" "the home is left untouched"
+  # Settle it by hand so no later watcher run trips over this landmine.
+  : >"$FOREMAN_HOME/tasks/h1/.home-closed"
+  pass "an unreachable Herdr leaves the finish standing"
+}
+
+test_an_unreachable_herdr_warns_and_changes_nothing
+test_a_finished_crew_releases_its_home_once
+test_a_failed_crew_releases_its_home
+test_a_blocked_crew_keeps_its_home
+test_a_review_crew_keeps_its_home
+test_a_working_crew_is_left_alone
 test_a_state_change_wakes_the_foreman
 test_a_review_names_the_linked_item_and_pr
 test_a_review_without_a_linked_item_names_the_crew
