@@ -307,17 +307,26 @@ process.stdout.write(`OFF_STATUS|${last(status) ?? ""}\n`);
 JS
 
 fm_home >/dev/null
-NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# Every row is stamped an hour or more in the past, never `now`. The chrome
+# renders an age from `at`, and the `CALM_CHROME` assertion compares a render
+# taken before the calm toggle with one taken after it: the toggle forks
+# `crew-config.sh`, and under load that gap can cross a one-second boundary. A
+# row stamped `now` then reads `0s` before and `1s` after, so the test failed on
+# the clock rather than on calm mode. An hour-old stamp is settled - its
+# rendered age cannot change anywhere inside the run - so the comparison is
+# about calm mode alone. `test_the_chrome_is_scoped...` and the other tests keep
+# exercising the just-now age with their own single renders.
 HOUR=$(fm_iso_ago 3600)
+TWO_HOURS=$(fm_iso_ago 7200)
 row() { # id state note at
   mkdir -p "$FOREMAN_HOME/tasks/$1"
   printf 'state=%s\nat=%s\nnote=%s\n' "$2" "$4" "$3" >"$FOREMAN_HOME/tasks/$1/status"
 }
 row c-alpha working "building the parser" "$HOUR"
-row c-beta blocked "[api] pick a retry policy" "$NOW"
-row c-epsilon blocked "waiting on CI" "$NOW"
-row c-gamma failed "no such host" "$NOW"
-row c-delta review "PR #12 waiting" "$NOW"
+row c-beta blocked "[api] pick a retry policy" "$TWO_HOURS"
+row c-epsilon blocked "waiting on CI" "$TWO_HOURS"
+row c-gamma failed "no such host" "$TWO_HOURS"
+row c-delta review "PR #12 waiting" "$TWO_HOURS"
 printf '11\topen\t-\tfinish the widget\n12\tactive\tc-beta\tland the parser\n13\tdone\t-\tship the suite\n' \
   >"$FOREMAN_HOME/todo.tsv"
 
