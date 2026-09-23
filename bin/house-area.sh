@@ -131,6 +131,7 @@ list)
 show)
   slug=${1:-}
   [ -n "$slug" ] || house_die "usage: house-area.sh show <slug>"
+  house_slug_ok "$slug" || house_die "bad area slug: $slug (lowercase letters, digits and dashes; max 32)"
   path=$(house_find_area "$slug") || house_die "no such area: $slug"
   cat "$path"
   ;;

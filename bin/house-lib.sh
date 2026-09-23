@@ -47,8 +47,10 @@ house_area_path() { printf '%s/%s.md' "$HOUSE_AREAS" "$1"; }
 house_archived_path() { printf '%s/%s.md' "$HOUSE_ARCHIVED" "$1"; }
 
 # The chart for a slug, active or archived; prints nothing and fails when
-# neither exists.
+# neither exists. The slug is validated here too, so a traversal like
+# `show ../secret` can never reach a file outside the chart.
 house_find_area() {
+  house_slug_ok "${1:-}" || return 1
   local p
   p=$(house_area_path "${1:-}")
   if [ -f "$p" ]; then

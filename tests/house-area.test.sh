@@ -181,6 +181,17 @@ test_note_appends_a_log_to_a_headerless_chart() {
   pass "a headerless chart gets a log rather than a stray field after the log lines"
 }
 
+test_show_refuses_a_traversal_slug() {
+  printf 'TOP SECRET\n' >"$FOREMAN_HOME/house/secret.md"
+  local out rc
+  out=$("$AREA" show '../secret' 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "a traversal slug was accepted by show"
+  assert_not_contains "$out" "TOP SECRET" "show did not cat a file outside the chart"
+  if "$AREA" show '../../../../tmp/secret' >/dev/null 2>&1; then fail "an absolute-ish traversal was accepted"; fi
+  pass "show refuses a slug that could reach outside the chart"
+}
+
 test_archive_retires_but_keeps() {
   local out
   out=$("$AREA" archive atlas)
@@ -200,6 +211,7 @@ test_empty_list
 test_add_creates_a_chart
 test_list_and_show
 test_refusals
+test_show_refuses_a_traversal_slug
 test_note_and_next
 test_backslash_is_literal
 test_newline_cannot_inject_a_field
