@@ -17,11 +17,11 @@ ROOTDIR=$(fm_tmproot chrome)
 # The layout pi discovers: <root>/.pi/extensions/, with the mechanics in
 # <root>/bin so the extension can find its install root the way it does in place.
 EXTDIR="$ROOTDIR/.pi/extensions"
-mkdir -p "$EXTDIR" "$ROOTDIR/node_modules/@earendil-works/pi-ai" \
+mkdir -p "$ROOTDIR/node_modules/@earendil-works/pi-ai" \
   "$ROOTDIR/node_modules/@earendil-works/pi-coding-agent"
 ln -s "$ROOT/bin" "$ROOTDIR/bin"
-# The extension and its vendored calm sibling, exactly as pi discovers them.
-cp "$ROOT/.pi/extensions/"*.ts "$EXTDIR/"
+# The extension and the sibling module it imports, in the pi-visible layout.
+fm_pi_tree "$ROOTDIR"
 
 cat >"$ROOTDIR/node_modules/@earendil-works/pi-ai/package.json" <<'JSON'
 { "name": "@earendil-works/pi-ai", "type": "module", "exports": "./index.js" }

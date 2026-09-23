@@ -57,6 +57,11 @@ foreman/
                          the model-facing tools, auto wake, and crew chrome.
                          Project-local, so pi discovers it whenever it runs in
                          this directory; trust the project once per clone.
+  .pi/lib/calm.ts        calm's presentation, imported by the extension and
+                         vendored from firstmate's Pi Calm. Outside
+                         extensions/ on purpose: pi loads every direct .ts
+                         there as an extension of its own, and this is a
+                         module, not an extension.
   .pi/skills/house/SKILL.md
                          the attending-physician framing for a house session
   bin/foreman            convenience: create the project dirs, then start pi
@@ -628,7 +633,12 @@ zero-token mechanics. Its shape follows from the design:
   Never name it with `-e` as well: a project extension plus an explicit one loads
   twice, giving two wake watchers and duplicated tools. Do not `pi install` it:
   installed globally would start its auto-wake watcher in every session, in every
-  project.
+  project. The vendored calm module is the counterexample: it lives at
+  `.pi/lib/calm.ts`, never under `extensions/`, because pi loads **every** direct
+  `.ts` under `.pi/extensions/` as an extension of its own (loader.js:559) and
+  only skips a default export that is not a function (loader.js:414-418). That
+  skip is luck. A module belongs outside the directory whose contract is "every
+  file here is an extension".
 - Herdr has **no** parent/child relationship for panes or agents. `herdr agent
   list` returns `parent_pane_id`, `parent_agent_id` and `depth`, but nothing can set
   them: no CLI flag, no socket method, and firstmate does not either. A crew reads
@@ -704,7 +714,8 @@ zero-token mechanics. Its shape follows from the design:
   simply wait.
 - Type-checking the extension needs a *sibling* `node_modules`: the global `tsc`
   rejects `baseUrl` and any non-relative `paths`, so copy `.pi/extensions/foreman.ts`
-  into a temp dir next to a symlink to
+  and `.pi/lib/calm.ts`, keeping their relative layout, into a temp dir next to a
+  symlink to
   `$HOME/.pi/agent/install/releases/<v>/node_modules`, add `{"type":"module"}` and a
   tsconfig with `types: ["node"]`, and run `tsc` there.
   `node --experimental-strip-types` runs the file directly for the chrome test, so a
