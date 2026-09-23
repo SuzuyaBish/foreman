@@ -17,6 +17,13 @@ TODO="$BIN/crew-todo.sh"
 add_item() { "$TODO" add "$@" | sed -n 's/^added #\([0-9][0-9]*\).*/\1/p'; }
 propose_item() { "$TODO" propose "$@" | sed -n 's/^proposed #\([0-9][0-9]*\).*/\1/p'; }
 
+# A project is a directory under projects/; the write path refuses a scope that
+# names none, so a fixture that scopes work creates the project first.
+project_dir() { mkdir -p "$FOREMAN_PROJECTS/$1"; }
+
+# The scope written on one row.
+scope_of() { awk -F'\t' -v s="$1" '$1 == s { print $6 }' "$FOREMAN_HOME/todo.tsv"; }
+
 test_add_and_sequence() {
   local out
   out=$("$TODO" add "first item")
@@ -277,6 +284,7 @@ test_proposals_wait_for_the_captain() {
 # reads as the project's.
 test_scopes_keep_projects_apart() {
   local out
+  project_dir Example_App
   "$TODO" add --project Example_App "sheet background" >/dev/null
   "$TODO" add --project foreman "tidy the chrome" >/dev/null
   "$TODO" focus Example_App >/dev/null
@@ -321,6 +329,7 @@ test_scopes_keep_projects_apart() {
 
 test_focus_follows_the_newest_crew() {
   local out
+  project_dir Example_App
   "$TODO" focus --clear >/dev/null
   assert_equals "foreman" "$("$TODO" focus)" "with no focus and no crew the scope is the harness"
 
@@ -372,6 +381,102 @@ test_sync_backfills_scope_from_the_crew() {
   pass "rows from before scopes are filed correctly, and explicit scopes are respected"
 }
 
+# --- scope write path -------------------------------------------------------
+#
+# A scope is free text in the row, so a misspelt project used to become a
+# project of its own: the work was then invisible from the real project's board
+# and surfaced only as an `elsewhere` count under a name nobody chose. The write
+# path resolves a name to a project that exists (ignoring case and separators)
+# or refuses it, naming the projects there are.
+test_an_unknown_scope_resolves_or_is_refused() {
+  local seq out before
+  project_dir habit-tracker
+
+  # A variant of a real project lands on the project that exists...
+  seq=$(add_item --project Habit_Tracker "bottom sheet from the more button")
+  assert_equals "habit-tracker" "$(scope_of "$seq")" "a case-and-separator variant resolves to the project that exists"
+  seq=$(add_item --project "habit tracker" "the same project, spaced")
+  assert_equals "habit-tracker" "$(scope_of "$seq")" "...and so does a spaced spelling"
+  seq=$(add_item --project habit_tracker "the same project, underscored")
+  assert_equals "habit-tracker" "$(scope_of "$seq")" "...and an underscored one"
+
+  # ...and never becomes a scope of its own.
+  assert_equals "" "$(awk -F'\t' '$6 == "Habit_Tracker" || $6 == "habit tracker" || $6 == "habit_tracker" { print $6 }' "$FOREMAN_HOME/todo.tsv")" \
+    "no spelling variant is written down as a scope"
+  assert_not_contains "$("$TODO" list --all)" "Habit_Tracker" "the board never names the misspelling"
+
+  # A real typo is refused, names the projects, and writes nothing.
+  before=$(cat "$FOREMAN_HOME/todo.tsv")
+  if out=$("$TODO" add --project habbit "a real typo" 2>&1); then fail "a typo was filed as a scope"; fi
+  assert_contains "$out" "habbit" "the refusal names the argument"
+  assert_contains "$out" "habit-tracker" "the refusal names the known projects"
+  assert_contains "$out" "foreman" "...including the harness itself"
+  assert_equals "$before" "$(cat "$FOREMAN_HOME/todo.tsv")" "a refused add writes nothing"
+
+  # A proposal is invisible by nature, so a misspelt scope would bury it twice.
+  seq=$(propose_item --project Habit_Tracker --note "spotted while reading" "resolve it on propose too")
+  assert_equals "habit-tracker" "$(scope_of "$seq")" "a proposal's scope resolves the same way"
+  before=$(cat "$FOREMAN_HOME/todo.tsv")
+  if "$TODO" propose --project habbit "typo proposal" >/dev/null 2>&1; then fail "a typo in a proposal was accepted"; fi
+  assert_equals "$before" "$(cat "$FOREMAN_HOME/todo.tsv")" "a refused proposal writes nothing"
+
+  # `focus` is the same lie on another surface: a bogus focus shows an empty
+  # board and reads as if the project has no work.
+  "$TODO" focus foreman >/dev/null
+  "$TODO" focus Habit_Tracker >/dev/null
+  assert_equals "habit-tracker" "$("$TODO" focus)" "focus resolves the same variants"
+  if "$TODO" focus habbit >/dev/null 2>&1; then fail "a bogus focus was accepted"; fi
+  assert_equals "habit-tracker" "$("$TODO" focus)" "a refused focus leaves the focus unchanged"
+
+  # Reads resolve too: a misspelt filter must not read as an empty board.
+  assert_contains "$("$TODO" list --project Habit_Tracker)" "bottom sheet from the more button" \
+    "list resolves a misspelt project filter"
+
+  "$TODO" focus foreman >/dev/null
+  pass "a scope resolves to a project that exists or is refused; a typo never becomes one"
+}
+
+# The other half of the same write path: an unscoped add used to take whatever
+# was in focus - on a fresh install the harness scope, in a busy session the last
+# crew's project. A set focus is a choice and a single project cannot be guessed
+# wrong; anything else is a guess and is refused with the projects to choose.
+test_an_unscoped_add_is_not_guessed() {
+  local out before want
+  project_dir Example_App
+  project_dir habit-tracker
+  "$TODO" focus --clear >/dev/null
+
+  # Several projects, no set focus: the fallback would be a guess.
+  before=$(cat "$FOREMAN_HOME/todo.tsv")
+  if out=$("$TODO" add "which project is this?" 2>&1); then fail "an unscoped add was guessed with several projects and no focus"; fi
+  assert_contains "$out" "Example_App" "the refusal names a project to choose"
+  assert_contains "$out" "habit-tracker" "...and the other one"
+  assert_equals "$before" "$(cat "$FOREMAN_HOME/todo.tsv")" "a refused unscoped add writes nothing"
+
+  # An explicit project always wins, focus or not.
+  "$TODO" add --project Example_App "explicit always wins" >/dev/null
+  assert_equals "Example_App" "$(awk -F'\t' '$4 == "explicit always wins" { print $6 }' "$FOREMAN_HOME/todo.tsv")" \
+    "an explicit --project is used with no focus set"
+
+  # A focus set by the captain is a choice, not a guess: the documented default.
+  "$TODO" focus habit-tracker >/dev/null
+  "$TODO" add "focused item" >/dev/null
+  assert_equals "habit-tracker" "$(awk -F'\t' '$4 == "focused item" { print $6 }' "$FOREMAN_HOME/todo.tsv")" \
+    "a set focus still defaults an unscoped add"
+
+  # A home with one project has nothing to guess between: the default stands.
+  "$TODO" focus --clear >/dev/null
+  mv "$FOREMAN_PROJECTS/Example_App" "$FOREMAN_HOME/Example_App.away"
+  "$TODO" add "lone project item" >/dev/null || fail "an unscoped add was refused with one project registered"
+  mv "$FOREMAN_HOME/Example_App.away" "$FOREMAN_PROJECTS/Example_App"
+  want=$("$TODO" focus)
+  assert_equals "$want" "$(awk -F'\t' '$4 == "lone project item" { print $6 }' "$FOREMAN_HOME/todo.tsv")" \
+    "with one project the documented focus default applies unchanged"
+
+  "$TODO" focus foreman >/dev/null
+  pass "an unscoped add is refused rather than guessed when several projects could be meant"
+}
+
 test_add_and_sequence
 test_list_rendering
 test_note_updates_in_place
@@ -385,4 +490,6 @@ test_scopes_keep_projects_apart
 test_focus_follows_the_newest_crew
 test_start_adopts_the_crews_project
 test_sync_backfills_scope_from_the_crew
+test_an_unknown_scope_resolves_or_is_refused
+test_an_unscoped_add_is_not_guessed
 test_proposals_wait_for_the_captain

@@ -114,6 +114,7 @@ test_the_tool_numbers_the_workspace_and_links_once() {
   local dir out seq relink
   dir=$(fm_tmproot spawn-tool-cwd)
 
+  mkdir -p "$FOREMAN_PROJECTS/proj"
   "$BIN/crew-todo.sh" add --project proj "label from the tool" >/dev/null
   seq=$(cut -f1 "$FOREMAN_HOME/todo.tsv" | tail -1)
   [ -n "$seq" ] || fail "the fixture item was not created"

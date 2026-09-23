@@ -54,10 +54,13 @@ project plan:
 - When the captain states a requirement, **add it as an item** before spawning
   anything. Ten things asked for means ten items, even if you start five.
 - **Scope the item to its project** with `project: <name>` when the work belongs
-  to one. One harness serves many projects, and the board reads one scope at a
-  time, so an unscoped item lands in whatever is in focus (the newest crew's
-  project, else `foreman` for the harness itself) rather than in the project you
-  meant. `show: all` is how you look across every project.
+  to one. One harness serves many projects, so the board reads one scope at a
+  time, and the name must be a project that exists: case and separators are
+  ignored (`Habit_Tracker` is `habit-tracker`), and an unknown name is refused
+  rather than invented. Leave `project` off only when the scope in focus is the
+  project you mean; with no focus set and more than one project registered, an
+  unscoped item is refused and the projects are listed. `show: all` is how you
+  look across every project.
 - When you spawn a crew member for an item, pass `todo: <n>` so the item links to
   the crew doing it. Linked items settle themselves: crew `done` closes the item,
   crew `failed`/`lost` reopens it.

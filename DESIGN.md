@@ -422,6 +422,16 @@ crew for a project *is* working on that project, which is why `crew-launch` sets
 it there), else `foreman`. Focus is per session, so two sessions can watch two
 projects.
 
+Reading a scope and writing one are held to different standards. A `--project`
+name is resolved against the project directories under `projects/`, ignoring
+case and separators (`Habit_Tracker` and `habit tracker` are both
+`habit-tracker`); a name that matches none is refused with the projects that
+exist, because a misspelt scope files work under a project nobody chose and only
+surfaces as an `elsewhere` count. An unscoped add takes the focus only when that
+is not a guess: a focus set with `focus` is honoured, and a home with at most
+one project has nothing to guess between; with more than one project registered
+and no set focus the add is refused and the projects are listed.
+
 Nothing is hidden silently: a list reports queued work in other scopes as an
 `elsewhere: foreman 1 open, 2 active` line - naming each status, so `active`
 work in flight is counted and the word `open` is never bent to cover it - and
