@@ -562,3 +562,16 @@ zero-token mechanics. Its shape follows from the design:
   tsconfig with `types: ["node"]`, and run `tsc` there.
   `node --experimental-strip-types` runs the file directly for the chrome test, so a
   type error only shows up in this check.
+
+- **A crew session must never carry the captain's extension.** A project that is
+  itself a checkout of this harness ships `.pi/extensions/foreman.ts` in every
+  worktree, so a self-hosted crew had pi discover that extension beside the one
+  the launcher names with `-e`. Both register `lavish_open` and `lavish_poll`, pi
+  refuses the second, and the crew lost the tools it was given while the file meant
+  to provide them sat inert. Crew launches therefore pass `-ne` (discovery off;
+  explicit `-e` paths still load) and set `FOREMAN_CREW=<id>`; the extension
+  returns early when that marker is set, which covers every pi the crew starts
+  afterwards because the marker is inherited. `tests/crew-foreman-ext.test.sh`
+  pins both halves — including that the captain still gets everything, since a
+  guard that makes the extension inert for everyone would be a worse bug.
+  The consequence for users: a crew never loads a project's own pi extensions.

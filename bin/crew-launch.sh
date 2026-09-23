@@ -130,7 +130,14 @@ if [ "$(foreman_config_bool trustPaths 1)" = 1 ] && [ -d "$HOME/.pi" ]; then
 fi
 
 POINTER="Read $DIR/brief.md and follow it exactly. It describes your whole task."
-CMD="${FOREMAN_PI_BIN:-pi}"
+# A crew session is not a foreman session, and the two must never load together.
+# When the project being worked on is a checkout of this harness (self-hosting),
+# its worktree ships .pi/extensions/foreman.ts: pi would discover it next to the
+# crew's own extension, both register lavish_*, and the project one is refused -
+# taking the crew's tools down with the error. So discovery is off (`-ne`) and the
+# crew's extension is named explicitly, which still loads. FOREMAN_CREW marks the
+# session for anything the crew starts later (see the guard in the extension).
+CMD="env FOREMAN_CREW=$(printf '%q' "$ID") ${FOREMAN_PI_BIN:-pi} -ne"
 [ "$APPROVE" != 1 ] || CMD="$CMD --approve"
 CMD="$CMD -e $(printf '%q' "$EXT")"
 [ -z "$MODEL" ] || CMD="$CMD --model $(printf '%q' "$MODEL")"

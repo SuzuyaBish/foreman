@@ -146,6 +146,10 @@ nothing is discarded when the pane closes.
 `projects/` is gitignored, so cloned repositories never enter this repo's
 history.
 
+Crew sessions are started with extension discovery off, so a project's own pi
+extensions never load inside a crew: a crew gets exactly the tools it was
+generated with, and can never inherit the captain's.
+
 A worktree is cut from the project's `HEAD`, so uncommitted work in that
 checkout is not carried into it. Spawning warns when that would happen, naming
 the count of modified/staged and untracked files, and goes ahead anyway.

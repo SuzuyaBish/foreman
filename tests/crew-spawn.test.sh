@@ -52,6 +52,16 @@ test_plain_directory_spawn() {
   pane=$(sed -n 's/^pane=default://p' "$TASKDIR/first/meta")
   assert_present "$HERDR_STUB_STATE/pane-$pane" "the recorded pane exists in Herdr"
   assert_contains "$(fm_herdr_pane_runs)" "$TASKDIR/first/brief.md" "the launch points the agent at its brief"
+
+  # The crew must be started with the harness's own extension out of the picture.
+  # Self-hosting is the case that broke: the project is this repo, so the worktree
+  # ships .pi/extensions/foreman.ts, pi discovers it beside the crew's extension,
+  # both register lavish_*, and the refusal takes the crew's tools with it.
+  local launched
+  launched=$(fm_herdr_pane_runs)
+  assert_contains "$launched" "-ne " "extension discovery is off, so a project's own extensions cannot collide"
+  assert_contains "$launched" "-e $TASKDIR/first/pi-ext.ts" "the crew's own extension is still named explicitly"
+  assert_contains "$launched" "FOREMAN_CREW=first" "the session is marked as a crew for anything it starts later"
   pass "a spawn seals the task, arms busy and launches one agent"
 }
 

@@ -828,6 +828,15 @@ function countPending(): number {
 }
 
 export default function foreman(pi: ExtensionAPI) {
+	// This extension is the captain's: the fleet chrome, the wake watcher, and the
+	// tools that spawn, steer and merge crew. A crew session must never have it.
+	// `crew-launch.sh` starts crew members with `-ne` (no extension discovery) and
+	// FOREMAN_CREW set, because a project that is a checkout of this harness ships
+	// this very file: discovered inside a crew, it collides with the crew's own
+	// extension (both register lavish_*), pi refuses it, and the crew loses the
+	// tools it does need. The flag prevents that at launch; this guard covers
+	// everything a crew starts afterwards, which inherits the marker.
+	if (process.env.FOREMAN_CREW) return;
 	for (const tool of [
 		crewTodo,
 		crewSpawn,
