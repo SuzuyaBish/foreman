@@ -3,21 +3,96 @@
 Talk to one agent. It runs the crew. Your context stays flat.
 
 Foreman is a small captain → foreman → crew harness for **Pi** (harness) and
-**Herdr** (multiplexer). Each crew member is a separate `pi` process in its own
-Herdr pane, in its own git worktree. Crew work in isolated contexts and write
-reports to disk. The foreman is given pointers and one-line statuses, never
-transcripts.
+**Herdr** (multiplexer). You are the captain: you talk to one foreman, and it
+runs a crew of parallel coding agents. Each crew member is a separate `pi`
+process in its own Herdr pane, in its own git worktree. Crew work in isolated
+contexts and write reports to disk. The foreman is given pointers and one-line
+statuses, never transcripts.
 
 Read [DESIGN.md](DESIGN.md) for the context contract. It is the point.
+
+## Contents
+
+- [The loop](#the-loop) — what using it actually looks like
+- [Who is who](#who-is-who) — the words this repo uses
+- [Requirements](#requirements) · [Run](#run) · [Projects](#projects)
+- [Crew settings](#crew-settings) · [Delivery](#delivery)
+- [Talking to a crew](#talking-to-a-crew) · [The chrome](#the-chrome)
+- [The todo list](#the-todo-list) · [Decisions](#decisions) · [Merges](#merges)
+- [Recovery](#recovery) · [Handoff](#handoff) · [Busy state](#busy-state)
+- [Teardown](#teardown) · [Lavish review boards](#lavish-review-boards)
+- [What you can ask the foreman for](#what-you-can-ask-the-foreman-for)
+- [Pieces](#pieces) · [Tests](#tests) · [License](#license)
+
+## The loop
+
+You have one conversation, and it looks like this:
+
+```
+> clone the repos I work on into projects/ for me, using gh
+
+> I need three things looked at: the flaky auth test, the unused CSS, and the
+  missing rate limit on /api/upload. Run the crew on deepseek-v4-pro.
+
+> status?
+
+  auth-flake    working  4m   reproduced: session cookie not refreshed
+  css-audit     done     2m   report ready
+  rate-limit    blocked  1m   needs decision: 429 vs 503
+
+> read the css one
+> tell rate-limit to use 429 with Retry-After
+> stop the auth one, I'll take it myself
+> merge css-audit
+```
+
+Behind it:
+
+1. Each request becomes a **todo item**, scoped to its project.
+2. Each item becomes a **crew member**: a fresh `pi`, its own git worktree, its
+   own workspace in Herdr's sidebar. The foreman keeps working — it is never
+   blocked waiting inside a crew's transcript.
+3. Crew members *write reports to disk*. The one-line state you see is read from
+   those records; the foreman gets a pointer and a status, never the transcript.
+4. When one needs a decision, or finishes, the foreman is **woken** and tells
+   you. Nothing polls you, and nothing is lost if a session dies.
+5. Work is delivered as a pull request. The foreman merges **only when you say
+   so**.
+6. Before you stop, it writes a dated note for the next session. Tomorrow, ask
+   "status?" and the plan is already on the board.
+
+## Who is who
+
+| Word | Means |
+|---|---|
+| **captain** | you. You decide; the foreman asks rather than guesses |
+| **foreman** | the one agent you talk to. Owns the plan, the crew and the merges |
+| **crew member** | one `pi` process on one task, in its own worktree and its own Herdr workspace |
+| **task** / **crew id** | the short name a crew member is addressed by, e.g. `parser-fix` |
+| **project** | a repository under `projects/`; also the *scope* a todo item belongs to |
+| **report** | what a crew member writes when it has news: `working`, `blocked`, `needs-decision`, `review`, `done`, `failed`, `lost` |
+| **steer** | a message to a running crew, through a durable inbox plus a doorbell |
+| **wake** | how the foreman learns a crew changed state, without you polling |
 
 ## Requirements
 
 - `pi` on PATH
 - `herdr` on PATH, server running (`herdr status`)
 - `jq`
+- `git`
 
-`bin/crew-doctor.sh` checks all of this (and the optional `gh`/`lavish-axi`) and
-runs at every session start; it is silent unless something is wrong.
+Pi and Herdr are separate projects; this repo assumes both are already
+installed. `gh` and `lavish-axi` are optional — without `gh` there is no
+pull-request delivery, without `lavish-axi` there are no review boards.
+
+`bin/crew-doctor.sh` checks all of this and runs at every session start; it is
+silent unless something is wrong. It says which checks are hard requirements and
+which merely cost you a feature.
+
+A crew member is a real agent session, so a fleet costs real model tokens. The
+settings below are where you keep that reasonable: run the crew on a cheaper
+model than yourself, or on `report` delivery when you want the thinking and not
+the pull request.
 
 ## Run
 
@@ -41,29 +116,13 @@ everywhere else — even after a reload — has no widget, no status line, no
 `crew_*` tools and no digest. That is deliberate: installing the extension
 globally would start its auto-wake watcher in every session, in every project.
 
-Every session starts the same way: the foreman reads `HANDOFF.md` (your
+Every session starts the same way. The foreman reads `HANDOFF.md` — your
 installation's standing notes, seeded on the first session from
-`HANDOFF.example.md`) and then `crew_todo` (the durable plan), as `AGENTS.md`
-instructs. It is gitignored: the harness's own sharp edges and traps live in
-`DESIGN.md`, with the code that has to obey them. It is also handed a one-line `crew digest:` and, once,
-the previous session's dated handoff note — both orientation, not the plan.
-
-```
-> clone the repos I work on into projects/ for me, using gh
-
-> I need three things looked at: the flaky auth test, the unused CSS, and the
-  missing rate limit on /api/upload. Run the crew on deepseek-v4-pro.
-
-> status?
-
-  auth-flake    working  4m   reproduced: session cookie not refreshed
-  css-audit     done     2m   report ready
-  rate-limit    blocked  1m   needs decision: 429 vs 503
-
-> read the css one
-> tell rate-limit to use 429 with Retry-After
-> stop the auth one, I'll take it myself
-```
+`HANDOFF.example.md`, and gitignored, because the harness's own sharp edges and
+traps live in `DESIGN.md` with the code that has to obey them — and then
+`crew_todo`, the durable plan. It is also handed a one-line `crew digest:` and,
+once, the previous session's dated handoff note. Both are orientation, not the
+plan.
 
 ## Projects
 
@@ -95,6 +154,9 @@ Told conversationally ("run the crew on X, thinking high"), persisted in
 | `crewWake` | `true` | wake the foreman when crew state changes |
 | `crewWidget` | `true` | the crew list above the editor |
 
+Settings are per-foreman-home, never committed, and settable by hand:
+`bin/crew-config.sh set crewModel <model>`.
+
 ## Delivery
 
 Work in a project is delivered as a pull request. A crew member commits on its
@@ -106,6 +168,24 @@ until the captain merges it. The watcher polls the PR and settles the task to
 A research task delivers a report instead (`done`, no PR); a project without a
 forge remote delivers locally. `crewDelivery` sets which is normal, and
 `crew_archive` refuses a task whose PR is still open.
+
+## Talking to a crew
+
+You do not have to talk to a crew member directly — ask the foreman and it
+steers. "tell rate-limit to use 429 with Retry-After" appends to that crew's
+inbox and rings its doorbell; the crew reads it at its next turn and
+acknowledges, so a steer survives a crew that is mid-command, and a session that
+restarts. `crew_send` does the same thing from the foreman's side.
+
+For a look without interrupting anything:
+
+- `crew_peek <id> [n]` — the last lines of that crew's pane, bounded.
+- `crew_read <id>` — the report it has written so far.
+- `crew_busy <id>` — `busy`, `idle`, `dead`, or `unknown`, and what said so.
+
+A crew member is a full pi session in a real pane, so you can also open its
+workspace and type at it yourself — the report on disk is still what the foreman
+reads, so ask it to write one if you change the plan.
 
 ## How a crew member appears
 
@@ -290,47 +370,37 @@ trim that line and cap the rest at ~4 KB before it reaches a model. The live
 path is opt-in tested: `FOREMAN_LAVISH_E2E=1 bin/crew-test.sh tests/crew-lavish-live.test.sh`
 starts a private `lavish-axi` server and runs the round trip.
 
-## Tests
+## What you can ask the foreman for
 
-```sh
-bin/crew-test.sh                            # every test file
-bin/crew-test.sh tests/crew-todo.test.sh    # one subject
-bin/crew-test.sh --list
-```
+These are the foreman's hands. You never call one yourself: you say what you
+want ("put that on the list", "stop the auth one") and it picks the tool.
 
-`tests/<subject>.test.sh` drives the real scripts in `bin/` inside an isolated
-`FOREMAN_HOME`, with fake `herdr`, `gh`, `pi` and `lavish-axi` first on `PATH`.
-The suite never touches a live Herdr session, a real pull request, or `~/.pi`.
-One file is one subject and stops at the first bad assertion; `crew-test.sh`
-reports one PASS/FAIL per file with its captured output.
+| Tool | What it does |
+|---|---|
+| `crew_todo` | the durable list: add, list, start, settle, focus a scope |
+| `crew_projects` / `crew_models` | what there is to work on / run on |
+| `crew_spawn <id>` | start a crew member on a task |
+| `crew_list` | the board: crew states and the todo list |
+| `crew_peek <id>` / `crew_read <id>` | that crew's pane / the report it wrote |
+| `crew_busy <id>` | working, idle, dead, or unknown — and what said so |
+| `crew_send <id> <text>` | steer a running crew |
+| `crew_pr_check <id>` | poll a delivered pull request |
+| `crew_decide <id> <key> <answer>` | answer the decision a crew is waiting on |
+| `crew_merge <id>` | merge a delivered PR, on your say-so only |
+| `crew_stop <id>` | interrupt, exit, or close a crew |
+| `crew_archive <id>` | retire a finished task; refuses while its PR is open |
+| `crew_recover [id]` | find tasks with no endpoint, or relaunch one in place |
+| `crew_cleanup <id>` | what that crew still has running, and the teardown |
+| `crew_config` | show or set the settings above |
+| `crew_handoff` | read or write the dated note for the next session |
+| `crew_wake_drain` | read the state changes the foreman was woken for |
+| `crew_doctor` | check this machine, before or during a session |
+| `lavish_open` / `lavish_poll` | put up a review board / read your annotations |
 
-It is a behaviour suite, not a mock suite: only the external server (`herdr`) and
-the network tools (`gh`, `pi`, `lavish-axi`) are stubbed. Everything else — the
-event fold, the todo list, the worktree mechanics, spawn/stop/recover — runs the
-production code path.
-
-Three files are deliberately live, and skip unless asked for. They exist because
-stubs cannot catch a bug where every piece is individually right and the wiring
-between them is not:
-
-```sh
-FOREMAN_E2E=1 bin/crew-test.sh tests/crew-e2e-live.test.sh
-# a real worktree, a real Herdr pane, a real pi crew, a real steer, then stop
-# and archive. Costs real model tokens; leaves nothing behind.
-
-FOREMAN_LAVISH_E2E=1 bin/crew-test.sh tests/crew-lavish-live.test.sh
-# a private lavish-axi server and browser-shaped feedback on every run.
-```
-
-The GitHub boundary has its own live file. It needs the repository name spelled
-out, because it creates a private throwaway repository and deletes it again:
-
-```sh
-FOREMAN_E2E=1 FOREMAN_E2E_REPO=<owner>/<name> \
-  bin/crew-test.sh tests/crew-github-live.test.sh
-# a real push, a real pull request, a real merge, a real remote branch deletion.
-# It refuses to run against a repository that already exists.
-```
+A crew member gets its own tools: `crew_report` (its state, its decision, its
+PR) and `crew_cleanup` (stop what it started, so nothing is left holding a
+port), plus the `lavish_*` pair below. `/crew` prints the board, `/crew on|off`
+toggles the widget.
 
 ## Pieces
 
@@ -351,7 +421,7 @@ FOREMAN_E2E=1 FOREMAN_E2E_REPO=<owner>/<name> \
 | `bin/crew-projects.sh` / `bin/crew-models.sh` | resolve names |
 | `bin/crew-doctor.sh [--quiet]` | check the machine before a session |
 | `bin/crew-digest.sh` | the one-line session-start digest |
-| `bin/crew-handoff.sh write\|read\|show` | the dated note for the next session |
+| `bin/crew-handoff.sh write\|read\|show\|standing` | the dated note, and the standing doc |
 | `bin/crew-config.sh` | show / set crew settings |
 | `bin/crew-worktree.sh add\|remove` | the git worktree mechanics |
 | `bin/crew-trust.sh <path>` | pi folder trust for a path |
@@ -365,8 +435,49 @@ FOREMAN_E2E=1 FOREMAN_E2E_REPO=<owner>/<name> \
 | `bin/crew-watch.sh` | one-shot watcher behind the auto wake |
 | `bin/crew-test.sh` | the behaviour suite in `tests/` |
 
+Internals, for reading rather than running: `bin/crew-launch.sh` (pane, worktree
+and fresh agent), `bin/crew-pi-ext.sh` (generates the crew's own tools),
+`bin/foreman-lib.sh` (paths, queue and Herdr helpers), and
+`bin/herdr-workspace-move.mjs` (the one socket call Herdr's CLI lacks).
+
 State lives in `.foreman/` (gitignored); `FOREMAN_HOME` relocates it and
 `FOREMAN_SESSION` picks a named Herdr session (default `default`).
+
+## Tests
+
+```sh
+bin/crew-test.sh                            # every test file
+bin/crew-test.sh tests/crew-todo.test.sh    # one subject
+bin/crew-test.sh --list
+```
+
+`tests/<subject>.test.sh` drives the real scripts in `bin/` inside an isolated
+`FOREMAN_HOME`, with fake `herdr`, `gh`, `pi` and `lavish-axi` first on `PATH`.
+The suite never touches a live Herdr session, a real pull request, or `~/.pi`.
+One file is one subject and stops at the first bad assertion; `crew-test.sh`
+reports one PASS/FAIL per file with its captured output. It is a behaviour suite
+rather than a mock suite — only the external server and the network tools are
+stubbed, and `DESIGN.md` explains why it is shaped that way.
+
+Three files are deliberately live and skip unless asked for, because stubs
+cannot catch a bug where every piece is individually right and the wiring
+between them is not:
+
+```sh
+FOREMAN_E2E=1 bin/crew-test.sh tests/crew-e2e-live.test.sh
+# a real worktree, a real Herdr pane, a real pi crew, a real steer, then stop
+# and archive. Costs real model tokens; leaves nothing behind.
+
+FOREMAN_LAVISH_E2E=1 bin/crew-test.sh tests/crew-lavish-live.test.sh
+# a private lavish-axi server and browser-shaped feedback on every run.
+
+FOREMAN_E2E=1 FOREMAN_E2E_REPO=<owner>/<name> \
+  bin/crew-test.sh tests/crew-github-live.test.sh
+# a real push, a real pull request, a real merge, a real remote branch
+# deletion. It needs the repository named, because it creates a private
+# throwaway repository and deletes it again, and it refuses to run against one
+# that already exists.
+```
 
 ## License
 
