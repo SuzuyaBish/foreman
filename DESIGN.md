@@ -255,6 +255,36 @@ second one. And a task whose record predates this — it names the foreman's own
 workspace and has no parent — owns nothing: closing it closes its tab, never the
 captain's workspace.
 
+## Scopes
+
+One harness serves many projects, and the todo list is where that would
+otherwise go wrong: the harness's own backlog would read as the project's, and a
+project you opened would show the previous one's finished work as its own.
+
+So every item carries a **scope** — a project name, or `foreman` for the harness
+itself — and the board reads one scope at a time. The scope in focus is set
+explicitly with `focus`, else derived from the newest crew's project (placing a
+crew for a project *is* working on that project, which is why `crew-launch` sets
+it there), else `foreman`. Focus is per session, so two sessions can watch two
+projects.
+
+Nothing is hidden silently: a list reports queued work in other scopes as an
+`open elsewhere: foreman 1 open` line, and the digest, summary and status line
+all name the scope they are counting. `--all` shows every scope, grouped under
+its own heading.
+
+The scope is written down when the item is added, so a later focus change cannot
+file old history under a new project. A row that predates scopes takes its own
+from the crew it is linked to at the next `sync`; an explicit scope is never
+rewritten, because that is the captain's word. Linking an item to a crew
+(`start`) settles its scope to that crew's project, since project work cannot be
+done by a crew standing somewhere else.
+
+The derivation lives in `crew-todo.sh` for the tools and again in the extension
+for the chrome — the chrome renders every 15 seconds and must not fork a shell to
+find out which project it is looking at. `tests/crew-chrome.test.sh` asserts both
+resolve the same scope on one fixture, so the two cannot drift apart.
+
 ## The chrome
 
 The status line and the crew widget are rendered from the task records on a

@@ -66,8 +66,22 @@ test_todo_counts() {
   local out
   out=$("$DIGEST")
   test_line_count "$out" "the digest is a single line"
-  assert_contains "$out" "todo 3 items (1 open, 1 active, 1 done)" "todo intent is counted from the list"
+  assert_contains "$out" "todo foreman: 3 items (1 open, 1 active, 1 done)" "todo intent is counted from the list"
   pass "the todo list is summarised by intent"
+}
+
+# One harness serves many projects, so the digest must not report another
+# project's backlog as this one's - nor hide work that is queued elsewhere.
+test_todo_scoped() {
+  local out
+  "$BIN/crew-todo.sh" add --project Example_App "sheet background" >/dev/null
+  "$BIN/crew-todo.sh" focus Example_App >/dev/null
+  out=$("$DIGEST")
+  test_line_count "$out" "the digest is a single line"
+  assert_contains "$out" "todo Example_App: 1 item (1 open, 0 active, 0 done)" \
+    "the digest counts the project in focus"
+  assert_contains "$out" "also foreman 1 open" "queued work in another scope is still surfaced"
+  pass "the digest is scoped to the project in focus"
 }
 
 test_no_herdr_needed() {
@@ -83,4 +97,5 @@ test_empty_home
 test_fleet_counts
 test_decisions_and_wakes
 test_todo_counts
+test_todo_scoped
 test_no_herdr_needed

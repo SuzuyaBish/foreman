@@ -169,6 +169,32 @@ test_the_widget_can_be_turned_off() {
   pass "the widget honours the config toggle"
 }
 
+# One harness serves many projects, so a project's chrome must not count another
+# project's backlog. The chrome derives its scope in TypeScript (it renders every
+# 15s and must not fork a shell), while the tools derive it in crew-todo.sh; this
+# asserts both agree on one fixture, which is what keeps them from drifting.
+test_the_chrome_is_scoped_to_the_project_in_focus() {
+  local h out status widget
+  h=$(fm_tmproot chrome-scoped)/home
+  mkdir -p "$h/tasks/c-proj"
+  printf 'project=%s\n' "/tmp/projects/Example_App" >"$h/tasks/c-proj/meta"
+  printf 'state=working\nat=%s\nnote=\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/c-proj/status"
+  printf '1\topen\t-\tsheet background\t-\tExample_App\n2\topen\t-\ttidy the chrome\t-\tforeman\n' >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  status=$(printf '%s\n' "$out" | sed -n 's/^STATUS|//p')
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+
+  assert_contains "$status" "todo 0/1 Example_App" "the status line counts the project in focus"
+  assert_contains "$status" "+1 open elsewhere" "queued work in another scope is counted, never hidden"
+  assert_contains "$widget" "sheet background" "the widget shows the project's item"
+  assert_not_contains "$widget" "tidy the chrome" "the widget does not show another scope's item"
+
+  assert_equals "Example_App" "$(FOREMAN_HOME="$h" "$BIN/crew-todo.sh" focus)" \
+    "the shell and the chrome resolve the scope the same way"
+  pass "the chrome reads the project in focus and never another project's backlog"
+}
+
 line_of() { # <text> <needle> -> 1-based line number
   printf '%s\n' "$1" | grep -n -F -e "$2" | head -1 | cut -d: -f1
 }
@@ -176,3 +202,4 @@ line_of() { # <text> <needle> -> 1-based line number
 test_the_status_line_leads_with_what_is_owed
 test_the_widget_ranks_and_tiers_the_crew
 test_the_widget_can_be_turned_off
+test_the_chrome_is_scoped_to_the_project_in_focus

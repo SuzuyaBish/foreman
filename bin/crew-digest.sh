@@ -64,13 +64,12 @@ wakes=$(foreman_queue_count)
 
 # --- todo -------------------------------------------------------------------
 
-if [ -f "$FOREMAN_HOME/todo.tsv" ]; then
-  todo=$(awk -F'\t' '
-    { n++; if ($2 == "open") o++; else if ($2 == "active") a++; else if ($2 == "done") d++ }
-    END { printf "%d items (%d open, %d active, %d done)", n + 0, o + 0, a + 0, d + 0 }
-  ' "$FOREMAN_HOME/todo.tsv")
+if [ -f "$FOREMAN_HOME/todo.tsv" ] || [ -n "$(foreman_task_ids)" ]; then
+  # Scoped: the project in focus, plus a note when queued work sits elsewhere.
+  # `summary` does not create files, so reading the digest stays side-effect free.
+  todo=$("$FOREMAN_ROOT/bin/crew-todo.sh" summary 2>/dev/null || true)
+  [ -n "$todo" ] || todo="0 items (0 open, 0 active, 0 done)"
 else
-  # Never create the file: reading the digest has no side effects.
   todo="0 items (0 open, 0 active, 0 done)"
 fi
 add_part "todo $todo"

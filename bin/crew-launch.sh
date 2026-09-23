@@ -95,6 +95,14 @@ foreman_meta_set "$ID" parent_workspace "$PARENT_WS"
 foreman_meta_set "$ID" session "$FOREMAN_SESSION"
 foreman_meta_set "$ID" cwd "$CWD"
 
+# Placing a crew for a project puts that project in focus, so the todo board
+# follows the work rather than the captain having to say so twice. Best effort:
+# a board that cannot be told is not a reason to fail a launch.
+PROJ=$(foreman_meta_get "$ID" project)
+if [ -n "$PROJ" ]; then
+  "$FOREMAN_ROOT/bin/crew-todo.sh" focus "$(basename "$PROJ")" >/dev/null 2>&1 || true
+fi
+
 # Presentation only, and best effort: if the position cannot be worked out, the
 # mover is absent, or Herdr refuses the move, the crew stays where Herdr put it
 # and the launch is still good.

@@ -550,6 +550,13 @@ fm_task() {
   printf '%s\n' "$dir"
 }
 
+# fm_task_project <id> <project-path>: make a task belong to a project, the way
+# crew-spawn records it. Scope is derived from this, in the shell and in the
+# chrome, so both read whatever this writes.
+fm_task_project() {
+  printf 'project=%s\n' "$2" >>"$FOREMAN_HOME/tasks/$1/meta"
+}
+
 # fm_iso_ago <seconds>: an ISO-8601 UTC timestamp that many seconds in the past.
 fm_iso_ago() {
   local s=$1

@@ -15,13 +15,13 @@ TODO="$BIN/crew-todo.sh"
 test_add_and_sequence() {
   local out
   out=$("$TODO" add "first item")
-  assert_equals "added #1" "$out" "the first item is #1"
-  assert_equals "added #2" "$("$TODO" add second item)" "the second item is #2"
-  assert_equals "added #3" "$("$TODO" add --note "why it matters" third item)" "an item can carry a note"
+  assert_equals "added #1 (foreman)" "$out" "the first item is #1"
+  assert_equals "added #2 (foreman)" "$("$TODO" add second item)" "the second item is #2"
+  assert_equals "added #3 (foreman)" "$("$TODO" add --note "why it matters" third item)" "an item can carry a note"
 
   # A dropped row still owns its number: reusing it would rewrite history.
   "$TODO" drop 2 >/dev/null
-  assert_equals "added #4" "$("$TODO" add "after a drop")" "sequence numbers never repeat"
+  assert_equals "added #4 (foreman)" "$("$TODO" add "after a drop")" "sequence numbers never repeat"
 
   if "$TODO" add >/dev/null 2>&1; then fail "an empty item was accepted"; fi
   pass "items are numbered monotonically and never reused"
@@ -139,6 +139,96 @@ test_summary() {
   pass "summary is a one-line count"
 }
 
+# --- scope ------------------------------------------------------------------
+
+# One harness serves many projects, so an item belongs to a project and the
+# board reads one project at a time. Without that, the harness's own backlog
+# reads as the project's.
+test_scopes_keep_projects_apart() {
+  local out
+  "$TODO" add --project Example_App "sheet background" >/dev/null
+  "$TODO" add --project foreman "tidy the chrome" >/dev/null
+  "$TODO" focus Example_App >/dev/null
+
+  out=$("$TODO" list)
+  assert_contains "$out" "sheet background" "the focused project's item is listed"
+  assert_not_contains "$out" "tidy the chrome" "another project's item is not"
+  local elsewhere
+  elsewhere=$(printf '%s\n' "$out" | sed -n 's/.*open elsewhere: foreman \([0-9][0-9]*\) open.*/\1/p')
+  [ -n "$elsewhere" ] && [ "$elsewhere" -ge 1 ] || fail "queued work in another scope is reported with a count (got '$out')"
+
+  out=$("$TODO" list --all)
+  assert_contains "$out" "tidy the chrome" "--all shows every scope"
+  assert_contains "$out" "Example_App" "--all names the scope it is showing"
+  assert_contains "$out" "foreman" "--all names the other scope too"
+
+  out=$("$TODO" list --project foreman)
+  assert_contains "$out" "tidy the chrome" "--project reads one named scope"
+  assert_not_contains "$out" "sheet background" "...and only that one"
+
+  out=$("$TODO" summary)
+  assert_contains "$out" "Example_App: 1 item (1 open, 0 active, 0 done)" "summary leads with the scope in focus"
+  assert_contains "$out" "also foreman" "summary points at queued work elsewhere"
+  assert_contains "$("$TODO" summary --all)" "all scopes:" "summary --all counts every scope"
+
+  if "$TODO" add --project "bad name" nope >/dev/null 2>&1; then fail "a project name with a space was accepted"; fi
+  if "$TODO" list --project "bad name" >/dev/null 2>&1; then fail "a bad project name was accepted by list"; fi
+  pass "an item belongs to one project and the board reads one project at a time"
+}
+
+test_focus_follows_the_newest_crew() {
+  local out
+  "$TODO" focus --clear >/dev/null
+  assert_equals "foreman" "$("$TODO" focus)" "with no focus and no crew the scope is the harness"
+
+  # `sleep 1` keeps this task strictly newer: the board picks the newest by
+  # timestamp, and a whole test file can otherwise land in one second.
+  sleep 1
+  fm_task proj-crew working >/dev/null
+  fm_task_project proj-crew /tmp/projects/Sample-Project
+  assert_equals "Sample-Project" "$("$TODO" focus)" "the scope follows the project of the newest crew"
+
+  # Per session: another session's focus is not this one's.
+  FOREMAN_SESSION=other "$TODO" focus Example_App >/dev/null
+  assert_equals "Sample-Project" "$("$TODO" focus)" "a second session's focus does not move this one"
+  assert_equals "Example_App" "$(FOREMAN_SESSION=other "$TODO" focus)" "...and its own focus is its own"
+
+  "$TODO" focus foreman >/dev/null
+  assert_equals "foreman" "$("$TODO" focus)" "an explicit focus wins over the newest crew"
+  out=$("$TODO" add "unscoped item")
+  assert_contains "$out" "(foreman)" "an item added with no project lands in the scope in focus"
+  pass "the board follows the project you were last working on, per session"
+}
+
+test_start_adopts_the_crews_project() {
+  local n
+  "$TODO" add --project foreman "wrongly filed" >/dev/null
+  n=$(awk -F'\t' '$4 == "wrongly filed" { print $1 }' "$FOREMAN_HOME/todo.tsv")
+  "$TODO" start "$n" proj-crew >/dev/null
+  assert_equals "Sample-Project" "$(awk -F'\t' -v s="$n" '$1 == s { print $6 }' "$FOREMAN_HOME/todo.tsv")" \
+    "linking work to a crew files it under that crew's project"
+  pass "a crew's project settles the scope of the work it is given"
+}
+
+test_sync_backfills_scope_from_the_crew() {
+  local out
+  fm_task backfill-crew working >/dev/null
+  fm_task_project backfill-crew /tmp/projects/Example_App
+  # Rows written before scopes existed: five fields, no scope.
+  printf '%s\t%s\t%s\t%s\t%s\n' 900 open backfill-crew "legacy row" - >>"$FOREMAN_HOME/todo.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\n' 901 open - "legacy harness row" - >>"$FOREMAN_HOME/todo.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' 902 open backfill-crew "chosen row" - foreman >>"$FOREMAN_HOME/todo.tsv"
+  "$TODO" sync >/dev/null
+
+  out=$(awk -F'\t' '$1 == 900 { print $6 }' "$FOREMAN_HOME/todo.tsv")
+  assert_equals "Example_App" "$out" "a legacy row takes the scope of the crew it is linked to"
+  assert_equals "foreman" "$(awk -F'\t' '$1 == 901 { print $6 }' "$FOREMAN_HOME/todo.tsv")" \
+    "a legacy row with no crew is harness work"
+  assert_equals "foreman" "$(awk -F'\t' '$1 == 902 { print $6 }' "$FOREMAN_HOME/todo.tsv")" \
+    "sync never overrules a scope the captain chose"
+  pass "rows from before scopes are filed correctly, and explicit scopes are respected"
+}
+
 test_add_and_sequence
 test_list_rendering
 test_note_updates_in_place
@@ -146,3 +236,7 @@ test_sanitize_protects_the_row_format
 test_start_done_open_drop
 test_sync_follows_the_crew
 test_summary
+test_scopes_keep_projects_apart
+test_focus_follows_the_newest_crew
+test_start_adopts_the_crews_project
+test_sync_backfills_scope_from_the_crew

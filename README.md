@@ -132,7 +132,7 @@ queue; the widget is worst-first, shows how long ago each crew last reported, an
 colours each state with its theme role:
 
 ```
-1 decision · 1 failed · 1 review · 2 working · todo 3/12
+1 decision · 1 failed · 1 review · 2 working · todo 3/12 Example_App
 
 c-authque        blocked  4m   [api] retry policy: fail fast or back off?
 c-ingest         failed   30m  no such host: registry.internal
@@ -148,7 +148,7 @@ toggles the widget.
 At session start the foreman is also handed one injected line, for example:
 
 ```
-crew digest: 3 crew (1 working, 1 blocked, 1 review) · 1 decision open · todo 12 items (7 open, 0 active, 5 done)
+crew digest: 3 crew (1 working, 1 blocked, 1 review) · 1 decision open · todo Example_App: 12 items (7 open, 0 active, 5 done)
 ```
 
 It is read from the same records, injected into context without triggering a
@@ -169,6 +169,24 @@ stands.
 2    active/review css-audit   audit unused CSS
 3    open         -            rate limit /api/upload
 ```
+
+Items are scoped by project, because one harness serves many projects: the board
+reads the project you are working on — the newest crew's project, or the one you
+set — so the queue in front of you is never another project's, and the harness's
+own backlog lives under `foreman` instead of crowding it out.
+
+```
+#    STATUS       CREW         ITEM
+2    active/review css-audit   audit unused CSS
+3    open         -            rate limit /api/upload
+
+  open elsewhere: foreman 1 open (crew-todo.sh list --all)
+```
+
+Queued work in another scope is counted rather than hidden, `show: all` groups
+every scope under its own heading, and adding an item without a project files it
+in the scope in focus. Placing a crew for a project puts that project in focus,
+so the board follows the work without you saying so twice.
 
 ## Decisions
 

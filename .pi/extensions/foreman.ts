@@ -108,7 +108,11 @@ const crewTodo = defineTool({
 		"it and knows what is queued, in flight, and finished. Use `action: add` to " +
 		"capture requirements as items, `list` to answer what is left, `start` to link " +
 		"an item to the crew member working on it, and `done`/`open`/`drop` to settle " +
-		"one by hand. Rows linked to crew are reconciled automatically.",
+		"one by hand. Rows linked to crew are reconciled automatically. " +
+		"Items are scoped by project: one harness serves many projects, and `list` " +
+		"shows the scope in focus (the project of the newest crew, unless set), so " +
+		"work for one project never reads as another's. Pass `project` on add to " +
+		"file an item elsewhere, and `show: all` to see every scope grouped.",
 	parameters: Type.Object({
 		action: Type.String({
 			description: "add | list | start | done | open | drop",
@@ -122,8 +126,15 @@ const crewTodo = defineTool({
 		crew: Type.Optional(
 			Type.String({ description: "For start: the crew task id doing the work" }),
 		),
+		project: Type.Optional(
+			Type.String({
+				description:
+					"For add: the project this work belongs to, e.g. the project name a crew was " +
+					"spawned into. Defaults to the scope in focus.",
+			}),
+		),
 		show: Type.Optional(
-			Type.String({ description: "For list: all (default) or open" }),
+			Type.String({ description: "For list: open, or all (every scope grouped)" }),
 		),
 	}),
 	async execute(_id, params) {
@@ -132,11 +143,20 @@ const crewTodo = defineTool({
 			const items: string[] = params.items?.length ? params.items : [];
 			if (items.length === 0) throw new Error("add needs one or more items");
 			const out: string[] = [];
-			for (const item of items) out.push(await run("crew-todo.sh", ["add", item], 500));
+			for (const item of items) {
+				const args = params.project ? ["add", "--project", params.project, item] : ["add", item];
+				out.push(await run("crew-todo.sh", args, 500));
+			}
 			return { content: [{ type: "text", text: out.join("\n") }], details: undefined };
 		}
 		if (action === "list") {
-			const text = await run("crew-todo.sh", ["list", params.show === "open" ? "--open" : "--all"]);
+			// No `--all` by default: the board reads the scope in focus, which is the
+			// whole point of scoping. `show: all` is how you ask for every project.
+			const args = ["list"];
+			if (params.show === "open") args.push("--open");
+			else if (params.show === "all") args.push("--all");
+			if (params.project) args.push("--project", params.project);
+			const text = await run("crew-todo.sh", args);
 			return { content: [{ type: "text", text }], details: undefined };
 		}
 		if (action === "start") {
@@ -566,6 +586,7 @@ interface TodoRow {
 	status: string;
 	crew: string;
 	text: string;
+	scope: string;
 }
 
 function readTodo(): TodoRow[] {
@@ -579,9 +600,61 @@ function readTodo(): TodoRow[] {
 	for (const line of raw.split("\n")) {
 		const parts = line.split("\t");
 		if (parts.length < 4) continue;
-		rows.push({ seq: parts[0], status: parts[1], crew: parts[2], text: parts[3] });
+		rows.push({
+			seq: parts[0],
+			status: parts[1],
+			crew: parts[2],
+			text: parts[3],
+			scope: parts[5] ?? "",
+		});
 	}
 	return rows;
+}
+
+/**
+ * The scope the board reads: the focus the captain set for this session, else
+ * the project of the newest crew (the work last done), else `foreman` for the
+ * harness itself. This mirrors `crew-todo.sh focus` line for line — the chrome
+ * renders every 15s and must not fork a shell to find out, so the rule lives in
+ * two places and `tests/crew-chrome.test.sh` pins them together on one fixture.
+ */
+function todoScope(): string {
+	const session = process.env.FOREMAN_SESSION ?? "default";
+	try {
+		const focus = fs.readFileSync(path.join(HOME, `focus.${session}`), "utf8").trim();
+		if (focus) return focus;
+	} catch {
+		// no explicit focus: fall through to the newest crew
+	}
+	let best = "";
+	let bestAt = "";
+	let ids: string[];
+	try {
+		ids = fs.readdirSync(TASKS);
+	} catch {
+		return "foreman";
+	}
+	for (const id of ids) {
+		let at = "";
+		try {
+			at = (fs.readFileSync(path.join(TASKS, id, "status"), "utf8").match(/^at=(.*)$/m) ?? ["", ""])[1];
+		} catch {
+			/* a task with no status is not the newest anything */
+		}
+		if (bestAt === "" || at > bestAt) {
+			bestAt = at;
+			best = id;
+		}
+	}
+	if (!best) return "foreman";
+	try {
+		const meta = fs.readFileSync(path.join(TASKS, best, "meta"), "utf8");
+		const proj = (meta.match(/^project=(.*)$/m) ?? ["", ""])[1];
+		if (proj) return path.basename(proj);
+	} catch {
+		/* a task without meta belongs to no project */
+	}
+	return "foreman";
 }
 
 function configFlag(key: string, fallback: boolean): boolean {
@@ -596,10 +669,15 @@ function configFlag(key: string, fallback: boolean): boolean {
 function updateChrome(ctx: ExtensionContext) {
 	if (!ctx.hasUI) return;
 	const rows = readBoard();
-	const todo = readTodo().filter((t) => t.status !== "dropped");
+	const allTodo = readTodo().filter((t) => t.status !== "dropped");
+	// Scoped: one harness serves many projects, so the board reads the project in
+	// focus. Queued work in another scope is counted, never silently dropped.
+	const scope = todoScope();
+	const todo = allTodo.filter((t) => (t.scope || "foreman") === scope);
 	const done = todo.filter((t) => t.status === "done").length;
+	const elsewhere = allTodo.filter((t) => t.status === "open" && (t.scope || "foreman") !== scope).length;
 
-	if (rows.length === 0 && todo.length === 0) {
+	if (rows.length === 0 && todo.length === 0 && elsewhere === 0) {
 		ctx.ui.setStatus("foreman", undefined);
 		ctx.ui.setWidget("foreman", undefined);
 		return;
@@ -626,7 +704,11 @@ function updateChrome(ctx: ExtensionContext) {
 		if (n) bits.push(fg(STATE_COLOR[state] ?? "muted", `${n} ${state}`));
 	}
 	// The todo list is a different axis from the crew, so it trails the line.
-	if (todo.length) bits.push(fg("muted", `todo ${done}/${todo.length}`));
+	if (todo.length || elsewhere) {
+		const label = scope === "foreman" ? `todo ${done}/${todo.length}` : `todo ${done}/${todo.length} ${scope}`;
+		const tail = elsewhere ? ` · +${elsewhere} open elsewhere` : "";
+		bits.push(fg("muted", `${label}${tail}`));
+	}
 	ctx.ui.setStatus("foreman", bits.join(" · "));
 
 	if (!configFlag("crewWidget", true)) {

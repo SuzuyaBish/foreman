@@ -99,6 +99,9 @@ test_isolation_uses_a_worktree() {
   assert_contains "$(cat "$TASKDIR/iso/meta")" "delivery=pr" "an origin remote makes the crew deliver a pull request"
   assert_contains "$(cat "$TASKDIR/iso/brief.md")" "git push -u origin crew/iso" "an isolated delivery teaches the push"
   assert_contains "$(cat "$TASKDIR/iso/brief.md")" 'crew_report(verb="review", note=' "the pr brief shows the review call"
+  # Placing a crew for a project is what "working on that project" means, so it
+  # is also what puts the project in front of the todo board.
+  assert_equals "proj" "$("$BIN/crew-todo.sh" focus)" "spawning for a project puts it in focus"
   pass "isolation gives the crew its own worktree on its own branch"
 }
 

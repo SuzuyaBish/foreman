@@ -34,6 +34,11 @@ replaces those two steps.
 project plan:
 - When the captain states a requirement, **add it as an item** before spawning
   anything. Ten things asked for means ten items, even if you start five.
+- **Scope the item to its project** with `project: <name>` when the work belongs
+  to one. One harness serves many projects, and the board reads one scope at a
+  time, so an unscoped item lands in whatever is in focus (the newest crew's
+  project, else `foreman` for the harness itself) rather than in the project you
+  meant. `show: all` is how you look across every project.
 - When you spawn a crew member for an item, pass `todo: <n>` so the item links to
   the crew doing it. Linked items settle themselves: crew `done` closes the item,
   crew `failed`/`lost` reopens it.
@@ -48,7 +53,7 @@ project plan:
 
 | Tool | Use |
 |---|---|
-| `crew_todo` | the durable project list: add, list, start, done, open, drop |
+| `crew_todo` | the durable project list: add (optionally scoped to a project), list, start, done, open, drop |
 | `crew_spawn` | start a crew member: id, project (or cwd), task, todo |
 | `crew_list` | todo + the whole fleet as one line each — your default look |
 | `crew_projects` / `crew_models` | resolve a project or model name |
