@@ -261,14 +261,16 @@ zero-token mechanics. Its shape follows from the design:
   `pi` and `lavish-axi` are external tools, so `tests/lib.sh` installs fakes for
   them first on `PATH`. The stub Herdr is per-pane files, which lets a test
   destroy a pane while keeping the tab — the churn recovery has to tell apart.
-  The exceptions are the two live files: `tests/crew-lavish-live.test.sh`
+  The exceptions are the live files: `tests/crew-lavish-live.test.sh`
   (`FOREMAN_LAVISH_E2E=1`, a private `lavish-axi` server and browser-shaped
-  feedback) and `tests/crew-e2e-live.test.sh` (`FOREMAN_E2E=1`, a real Herdr pane,
-  a real pi crew, a real steer). Both skip by default so the suite stays
-  hermetic. The live wire file exists because stubs cannot see the class of bug
-  where every piece is individually correct and the wiring between them is not —
-  it found exactly one (`foreman_use_home`, see the busy state above) the first
-  time it ran.
+  feedback), `tests/crew-e2e-live.test.sh` (`FOREMAN_E2E=1`, a real Herdr pane, a
+  real pi crew, a real steer) and `tests/crew-github-live.test.sh` (also
+  `FOREMAN_E2E=1`, plus `FOREMAN_E2E_REPO=<owner>/<name>`: it creates a private
+  throwaway repository and refuses to run if that name already exists, so it can
+  never touch a real one). All skip by default so the suite stays hermetic. The
+  live wire file exists because stubs cannot see the class of bug where every
+  piece is individually correct and the wiring between them is not — it found
+  exactly one (`foreman_use_home`, see the busy state above) the first time it ran.
 - **One file, one subject.** A test file stops at the first failed assertion and
   the runner reports one PASS/FAIL per file with its output, so a failure names
   the contract that broke rather than one assertion out of hundreds.

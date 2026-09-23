@@ -229,7 +229,7 @@ the network tools (`gh`, `pi`, `lavish-axi`) are stubbed. Everything else — th
 event fold, the todo list, the worktree mechanics, spawn/stop/recover — runs the
 production code path.
 
-Two files are deliberately live, and skip unless asked for. They exist because
+Three files are deliberately live, and skip unless asked for. They exist because
 stubs cannot catch a bug where every piece is individually right and the wiring
 between them is not:
 
@@ -240,6 +240,16 @@ FOREMAN_E2E=1 bin/crew-test.sh tests/crew-e2e-live.test.sh
 
 FOREMAN_LAVISH_E2E=1 bin/crew-test.sh tests/crew-lavish-live.test.sh
 # a private lavish-axi server and browser-shaped feedback on every run.
+```
+
+The GitHub boundary has its own live file. It needs the repository name spelled
+out, because it creates a private throwaway repository and deletes it again:
+
+```sh
+FOREMAN_E2E=1 FOREMAN_E2E_REPO=<owner>/<name> \
+  bin/crew-test.sh tests/crew-github-live.test.sh
+# a real push, a real pull request, a real merge, a real remote branch deletion.
+# It refuses to run against a repository that already exists.
 ```
 
 ## Pieces
