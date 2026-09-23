@@ -1279,7 +1279,14 @@ export default function foreman(pi: ExtensionAPI) {
 	// tools it does need. The flag prevents that at launch; this guard covers
 	// everything a crew starts afterwards, which inherits the marker.
 	if (process.env.FOREMAN_CREW) return;
-	for (const tool of [
+
+	// House is the physician, not a second foreman: it examines, diagnoses,
+	// prescribes and (on say-so) sends, and it must never spawn, merge, archive or
+	// steer. In a house session the discipline is enforced by the tool list, not
+	// just the skill, so the crew_* tools are simply not registered. A normal
+	// foreman session keeps both sets, because the captain drives House from the
+	// foreman on request.
+	const crewTools = [
 		crewTodo,
 		crewSpawn,
 		crewList,
@@ -1299,6 +1306,8 @@ export default function foreman(pi: ExtensionAPI) {
 		crewWakeDrain,
 		crewDoctor,
 		crewHandoff,
+	];
+	const houseTools = [
 		houseAreas,
 		houseVisit,
 		houseNote,
@@ -1306,9 +1315,13 @@ export default function foreman(pi: ExtensionAPI) {
 		houseRounds,
 		housePrescribe,
 		houseSend,
-		lavishOpen,
-		lavishPoll,
-	]) {
+	];
+	const sharedTools = [lavishOpen, lavishPoll];
+	const tools =
+		process.env.FOREMAN_MODE === "house"
+			? [...houseTools, ...sharedTools]
+			: [...crewTools, ...houseTools, ...sharedTools];
+	for (const tool of tools) {
 		pi.registerTool(calmTool(tool));
 	}
 
