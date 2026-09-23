@@ -56,17 +56,60 @@ fi
 ARGS=(pr merge "$PR" --"$METHOD")
 [ "$DELETE_BRANCH" = 0 ] || ARGS+=(--delete-branch)
 
-if ! ERR=$(cd "$PROJ" && gh "${ARGS[@]}" 2>&1); then
+# A refusal GitHub calls temporary -- the base branch moved -- is retried here,
+# not handed back to the crew. Nothing about the crew's work changed and its
+# branch is untouched, so a wake would be a whole crew turn for a merge GitHub
+# invites us to simply try again. Only the transient signature is retried; a
+# real failure falls straight through to the blocker below.
+ATTEMPTS=${FOREMAN_MERGE_ATTEMPTS:-3}
+case "$ATTEMPTS" in '' | *[!0-9]*) ATTEMPTS=3 ;; esac
+[ "$ATTEMPTS" -ge 1 ] || ATTEMPTS=1
+RETRY_SLEEP=${FOREMAN_MERGE_RETRY_SLEEP:-2}
+case "$RETRY_SLEEP" in '' | *[!0-9]*) RETRY_SLEEP=2 ;; esac
+
+ATTEMPT=0
+MERGED=0
+ERR=
+REASON=
+while [ "$ATTEMPT" -lt "$ATTEMPTS" ]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  if ERR=$(cd "$PROJ" && gh "${ARGS[@]}" 2>&1); then
+    MERGED=1
+    break
+  fi
   # Carry gh's own reason, not just "failed": otherwise the captain has to re-run
   # gh by hand to learn whether it was a conflict, a check, or a permission. The
-  # events log is tab-separated, so collapse it to one bounded line first.
+  # events log is tab-separated, so collapse it to one bounded line first. The
+  # transient test reads the full output, so a long prefix cannot hide it.
   REASON=$(printf '%s' "$ERR" | tr '\n\t' '  ' | tr -s ' ' | sed -e 's/^ *//' -e 's/ *$//' | cut -c1-160)
   [ -n "$REASON" ] || REASON="gh exited nonzero"
-  foreman_event_append "$ID" blocked "" "merge command failed for $PR: $REASON"
+  if [ "$ATTEMPT" -lt "$ATTEMPTS" ] && foreman_merge_refusal_transient "$ERR"; then
+    foreman_event_append "$ID" progress "" \
+      "merge refused transiently for $PR (attempt $ATTEMPT/$ATTEMPTS), retrying: $REASON"
+    [ "$RETRY_SLEEP" -eq 0 ] || sleep "$RETRY_SLEEP"
+    continue
+  fi
+  break
+done
+
+if [ "$MERGED" = 1 ]; then
+  foreman_event_append "$ID" done "" "merged by the foreman: $PR"
   foreman_status_sync "$ID"
-  foreman_die "gh could not merge $PR: $REASON"
+  printf 'merged %s (%s)\n' "$PR" "$METHOD"
+  exit 0
 fi
 
-foreman_event_append "$ID" done "" "merged by the foreman: $PR"
+if foreman_merge_refusal_transient "$ERR"; then
+  # GitHub kept asking, but the refusal is still only "try again": the pull
+  # request is open and mergeable and nothing is wrong with the crew's branch.
+  # So the task stays in review and the captain, whenever they like, re-runs the
+  # merge -- no crew wake, no re-report. The record keeps a line saying so.
+  foreman_event_append "$ID" progress "" \
+    "merge refused transiently for $PR after $ATTEMPTS attempts, still in review: $REASON"
+  foreman_status_sync "$ID"
+  foreman_die "gh could not merge $PR yet (transient refusal; task stays in review): $REASON"
+fi
+
+foreman_event_append "$ID" blocked "" "merge command failed for $PR: $REASON"
 foreman_status_sync "$ID"
-printf 'merged %s (%s)\n' "$PR" "$METHOD"
+foreman_die "gh could not merge $PR: $REASON"

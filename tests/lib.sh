@@ -490,8 +490,20 @@ pr)
     ;;
   merge)
     code=0
-    [ -f "$state/merge-exit" ] && code=$(cat "$state/merge-exit")
-    [ -f "$state/merge-reason" ] && cat "$state/merge-reason" >&2
+    # A test can make a merge fail once and then succeed by writing one exit code
+    # per line to merge-exit-seq; each call consumes the first line. When the
+    # sequence is exhausted (or absent), merge-exit is the standing answer.
+    if [ -s "$state/merge-exit-seq" ]; then
+      code=$(head -n 1 "$state/merge-exit-seq")
+      tail -n +2 "$state/merge-exit-seq" >"$state/merge-exit-seq.tmp" 2>/dev/null || :
+      mv "$state/merge-exit-seq.tmp" "$state/merge-exit-seq"
+    elif [ -f "$state/merge-exit" ]; then
+      code=$(cat "$state/merge-exit")
+    fi
+    case "$code" in '' | *[!0-9]*) code=1 ;; esac
+    if [ "$code" -ne 0 ] && [ -f "$state/merge-reason" ]; then
+      cat "$state/merge-reason" >&2
+    fi
     exit "$code"
     ;;
   *) exit 1 ;;
