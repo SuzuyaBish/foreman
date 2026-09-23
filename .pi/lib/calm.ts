@@ -47,8 +47,10 @@
  * collapse whenever calm is on, which drops visible thinking and the collapsed
  * label with one rule and lets a toggle redraw rows already on screen. The row
  * classes are named for our rows, and the tool rows keep the extension's own
- * zero-line wrapper rather than firstmate's `Box`/`Container` reconstruction -
- * that avoids a `@earendil-works/pi-tui` import the test harness does not stub.
+ * zero-line wrapper rather than firstmate's `Box`/`Container` reconstruction:
+ * we mirror pi's `Box(1, 1, bgFn)` frame in a small local component so a hidden
+ * built-in row reaches pi's zero-line `renderShell: "self"` path, without the
+ * `@earendil-works/pi-tui` import the test harness does not stub.
  * Dropped on purpose: firstmate's animated working ship, its mid-turn
  * "working note" collapse, its operational-user row adapter, and its `/export`
  * stock-render guard. Each is named in the task report.
@@ -181,9 +183,41 @@ export function calmWrap(inner: CalmComponent, rowClass: CalmRowClass): CalmComp
 	};
 }
 
-/** Visible width, ignoring the SGR escapes the theme adds. */
+/** A double-width cell, so a path with CJK or emoji still pads to the window. */
+function calmWide(code: number): boolean {
+	return (
+		code >= 0x1100 &&
+		(code <= 0x115f ||
+			code === 0x2329 ||
+			code === 0x232a ||
+			(code >= 0x2e80 && code <= 0xa4cf) ||
+			(code >= 0xac00 && code <= 0xd7a3) ||
+			(code >= 0xf900 && code <= 0xfaff) ||
+			(code >= 0xfe30 && code <= 0xfe4f) ||
+			(code >= 0xff00 && code <= 0xff60) ||
+			(code >= 0xffe0 && code <= 0xffe6) ||
+			(code >= 0x1f300 && code <= 0x1faff) ||
+			(code >= 0x20000 && code <= 0x3fffd))
+	);
+}
+
+/**
+ * Visible width, ignoring the escapes the theme and pi's hyperlinks add. Both
+ * kinds appear in a built-in tool row: SGR for the background and OSC 8 for the
+ * file link, and a length that counts the escape bytes pads the background short.
+ */
 function calmVisible(text: string): number {
-	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").length;
+	const clean = text
+		.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+		.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+		.replace(/\x1b[@-Z\\-_]/g, "");
+	let width = 0;
+	for (const char of clean) {
+		const code = char.codePointAt(0) ?? 0;
+		if (code === 0x200d || code === 0xfe0f) continue;
+		width += calmWide(code) ? 2 : 1;
+	}
+	return width;
 }
 
 /** Split a plain line by code point when it is wider than the row. */
@@ -258,21 +292,120 @@ export function calmTool(tool: any): any {
 	};
 }
 
-/** Wrap a built-in tool's own renderers, keeping its shell and its look. */
+/**
+ * The padded, backgrounded frame pi draws a tool row into, redrawn by us so the
+ * whole row can take zero lines while calm is on. Pi's default shell is a
+ * `Box(1, 1, bgFn)` preceded by a `Spacer(1)` that its `ToolExecutionComponent`
+ * adds once in its constructor. That spacer is unconditional on the default
+ * path; only the `renderShell: "self"` path drops it when the frame is empty.
+ * We mirror the Box here - one padded blank row, content indented one column,
+ * one padded blank row - because pi's self path leaves the framing to us and we
+ * cannot import `@earendil-works/pi-tui` in the test harness.
+ */
+interface CalmShell extends CalmComponent {
+	setBg(fn: (text: string) => string): void;
+	clear(): void;
+	add(child: CalmComponent): void;
+}
+
+function calmShell(): CalmShell {
+	let children: CalmComponent[] = [];
+	let bg: (text: string) => string = (text) => text;
+	return {
+		setBg(fn) {
+			bg = fn;
+		},
+		clear() {
+			children = [];
+		},
+		add(child) {
+			children.push(child);
+		},
+		invalidate() {
+			for (const child of children) child.invalidate?.();
+		},
+		render(width: number) {
+			if (!children.length) return [];
+			const inner = Math.max(1, width - 2);
+			const lines: string[] = [];
+			for (const child of children) {
+				for (const line of child.render(inner)) lines.push(` ${line}`);
+			}
+			if (!lines.length) return [];
+			const paint = (line: string) => bg(line + " ".repeat(Math.max(0, width - calmVisible(line))));
+			return [paint(""), ...lines.map(paint), paint("")];
+		},
+	};
+}
+
+/**
+ * Wrap a built-in tool's own renderers. A definition that already frames itself
+ * (`renderShell: "self"`, as `edit` does) is hidden whole and keeps its own
+ * shell. The rest use pi's default frame, and that frame is the bug: a hidden
+ * row still draws the `Spacer(1)` pi put in front of it, one blank line per tool
+ * call, stacking down a turn. Giving those definitions a self shell - and
+ * redrawing pi's Box ourselves - routes a hidden row into pi's zero-line path.
+ */
 function calmBuiltin(def: any): any {
 	if (!def.renderCall && !def.renderResult) return def;
 	// The built-in renderers reuse `context.lastComponent` and call methods on it
 	// for cheap streaming updates. We hand them the wrapper, not their own Text,
 	// so they must build fresh - pass `lastComponent: undefined` through.
 	const fresh = (ctx: any) => ({ ...ctx, lastComponent: undefined });
+	// A definition that frames itself already reaches pi's zero-line path, and a
+	// one-slot definition has no shared frame to build - both keep the plain
+	// wrapper, which still hides the slot it wraps.
+	if (def.renderShell === "self" || !def.renderCall || !def.renderResult) {
+		return {
+			...def,
+			renderCall: def.renderCall
+				? (args: any, theme: any, ctx: any) => calmWrap(def.renderCall(args, theme, fresh(ctx)), "assistant-tool-call")
+				: undefined,
+			renderResult: def.renderResult
+				? (result: any, options: any, theme: any, ctx: any) =>
+						calmWrap(def.renderResult(result, options, theme, fresh(ctx)), "tool-result")
+				: undefined,
+		};
+	}
+	// One frame per on-screen row, shared by both render slots so the call and
+	// its result draw inside one box the way pi's default shell does. Pi re-runs
+	// both slots on every update, so the call slot resets the frame each pass.
+	const shells = new WeakMap<object, CalmShell>();
+	const shellFor = (ctx: any): CalmShell => {
+		const key = (ctx?.state ?? ctx) as object;
+		let shell = shells.get(key);
+		if (!shell) {
+			shell = calmShell();
+			shells.set(key, shell);
+		}
+		return shell;
+	};
+	const empty: CalmComponent = { render: () => [] };
+	const paintWith = (theme: any, ctx: any) => {
+		const role = calmRole(ctx?.isPartial, ctx?.isError);
+		return (text: string) => (typeof theme?.bg === "function" ? theme.bg(role, text) : text);
+	};
 	return {
 		...def,
+		renderShell: "self",
 		renderCall: def.renderCall
-			? (args: any, theme: any, ctx: any) => calmWrap(def.renderCall(args, theme, fresh(ctx)), "assistant-tool-call")
+			? (args: any, theme: any, ctx: any) => {
+					if (calmHides("assistant-tool-call")) return empty;
+					const shell = shellFor(ctx);
+					shell.setBg(paintWith(theme, ctx));
+					shell.clear();
+					shell.add(def.renderCall(args, theme, fresh(ctx)));
+					return shell;
+				}
 			: undefined,
 		renderResult: def.renderResult
-			? (result: any, options: any, theme: any, ctx: any) =>
-					calmWrap(def.renderResult(result, options, theme, fresh(ctx)), "tool-result")
+			? (result: any, options: any, theme: any, ctx: any) => {
+					if (calmHides("tool-result")) return empty;
+					const shell = shellFor(ctx);
+					shell.setBg(paintWith(theme, ctx));
+					shell.add(def.renderResult(result, options, theme, fresh(ctx)));
+					return empty;
+				}
 			: undefined,
 	};
 }
