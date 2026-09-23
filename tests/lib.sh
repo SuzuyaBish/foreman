@@ -393,6 +393,7 @@ pr)
   merge)
     code=0
     [ -f "$state/merge-exit" ] && code=$(cat "$state/merge-exit")
+    [ -f "$state/merge-reason" ] && cat "$state/merge-reason" >&2
     exit "$code"
     ;;
   *) exit 1 ;;

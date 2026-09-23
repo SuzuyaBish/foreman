@@ -229,6 +229,19 @@ the network tools (`gh`, `pi`, `lavish-axi`) are stubbed. Everything else — th
 event fold, the todo list, the worktree mechanics, spawn/stop/recover — runs the
 production code path.
 
+Two files are deliberately live, and skip unless asked for. They exist because
+stubs cannot catch a bug where every piece is individually right and the wiring
+between them is not:
+
+```sh
+FOREMAN_E2E=1 bin/crew-test.sh tests/crew-e2e-live.test.sh
+# a real worktree, a real Herdr pane, a real pi crew, a real steer, then stop
+# and archive. Costs real model tokens; leaves nothing behind.
+
+FOREMAN_LAVISH_E2E=1 bin/crew-test.sh tests/crew-lavish-live.test.sh
+# a private lavish-axi server and browser-shaped feedback on every run.
+```
+
 ## Pieces
 
 | Command | Does |

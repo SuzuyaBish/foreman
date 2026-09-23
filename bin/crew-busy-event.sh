@@ -21,7 +21,7 @@ ID=${3:-}
 [ -n "$HOME_DIR" ] && [ -n "$ID" ] || foreman_die "usage: crew-busy-event.sh <arm|apply|retire> <home> <id> ..."
 shift 3 || true
 
-FOREMAN_HOME=$HOME_DIR
+foreman_use_home "$HOME_DIR"
 DIR=$(foreman_task_dir "$ID")
 REC="$DIR/busy-state"
 GEN="$DIR/busy-gen"

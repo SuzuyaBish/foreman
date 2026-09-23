@@ -147,6 +147,26 @@ test_failed_merge_is_visible() {
   pass "a failed merge becomes a visible blocker, never a silent success"
 }
 
+test_failed_merge_keeps_gh_reason() {
+  review_task m10 49
+  printf '2\n' >"$GH_STUB_STATE/merge-exit"
+  # gh is chatty and multi-line; the note must carry the reason, intact and on
+  # one line, because the events log it lands in is tab separated.
+  printf 'X Pull request is not mergeable: the base branch has conflicts\n  try resolving them first\n' \
+    >"$GH_STUB_STATE/merge-reason"
+  "$MERGE" m10 >/dev/null 2>&1 || true
+  local note
+  note=$(note_of m10)
+  assert_contains "$note" "not mergeable" "the blocker carries gh's own reason"
+  assert_contains "$note" "base branch has conflicts" "the whole reason survives, not just the first word"
+  assert_equals "1" "$(printf '%s\n' "$note" | wc -l | tr -d ' ')" "the note is one line"
+  assert_equals "4" "$(awk -F'\t' 'END { print NF }' "$FOREMAN_HOME/tasks/m10/events")" \
+    "the events record still has exactly four fields"
+  assert_equals "blocked" "$(state_of m10)" "the fold still reads the record"
+  rm -f "$GH_STUB_STATE/merge-exit" "$GH_STUB_STATE/merge-reason"
+  pass "a failed merge says why, on one line"
+}
+
 test_delete_branch_removes_the_worktree_first() {
   local proj
   proj="$FOREMAN_PROJECTS/mergerepo"
@@ -175,6 +195,7 @@ test_merge_requires_review
 test_merge_settles_the_task
 test_methods
 test_failed_merge_is_visible
+test_failed_merge_keeps_gh_reason
 test_delete_branch_removes_the_worktree_first
 test_delete_branch_refuses_a_dirty_worktree
 test_failed_merge_leaves_the_work_untouched

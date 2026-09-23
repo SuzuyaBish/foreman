@@ -121,7 +121,30 @@ test_busy_verdicts() {
   pass "busy is busy, idle, dead or unknown -- never a guess"
 }
 
+test_an_explicit_home_is_honoured() {
+  # A crew's shell does not inherit FOREMAN_HOME, so its generated extension
+  # passes the foreman home positionally. The record paths are cached when the
+  # lib is sourced, so a script that re-points only FOREMAN_HOME writes to the
+  # wrong home. This was a real bug: every agent_start/agent_settled write from a
+  # crew whose home was not the ambient one went missing, and the busy record sat
+  # at its spawn value forever.
+  local other
+  other="$(fm_tmproot busy-other)/home"
+  mkdir -p "$other"
+  "$EVENT" arm "$other" b5 --state busy --source fm-spawn >/dev/null ||
+    fail "arming a task in a named home failed"
+  "$EVENT" apply "$other" b5 idle --current-gen --source crew-ext --event agent-settled >/dev/null ||
+    fail "applying to a task in a named home failed"
+  assert_contains "$(cat "$other/tasks/b5/busy-state")" "state=idle" \
+    "the write lands in the home the caller named"
+  assert_contains "$(cat "$other/tasks/b5/busy-state")" "source=crew-ext" \
+    "the crew's own source is recorded"
+  assert_absent "$FOREMAN_HOME/tasks/b5" "the ambient home is left alone"
+  pass "an explicitly passed home is honoured, not the ambient one"
+}
+
 test_arm_mints_an_incarnation
 test_apply_requires_the_current_generation
+test_an_explicit_home_is_honoured
 test_retire
 test_busy_verdicts

@@ -56,10 +56,15 @@ fi
 ARGS=(pr merge "$PR" --"$METHOD")
 [ "$DELETE_BRANCH" = 0 ] || ARGS+=(--delete-branch)
 
-if ! (cd "$PROJ" && gh "${ARGS[@]}"); then
-  foreman_event_append "$ID" blocked "" "merge command failed for $PR"
+if ! ERR=$(cd "$PROJ" && gh "${ARGS[@]}" 2>&1); then
+  # Carry gh's own reason, not just "failed": otherwise the captain has to re-run
+  # gh by hand to learn whether it was a conflict, a check, or a permission. The
+  # events log is tab-separated, so collapse it to one bounded line first.
+  REASON=$(printf '%s' "$ERR" | tr '\n\t' '  ' | tr -s ' ' | sed -e 's/^ *//' -e 's/ *$//' | cut -c1-160)
+  [ -n "$REASON" ] || REASON="gh exited nonzero"
+  foreman_event_append "$ID" blocked "" "merge command failed for $PR: $REASON"
   foreman_status_sync "$ID"
-  foreman_die "gh could not merge $PR"
+  foreman_die "gh could not merge $PR: $REASON"
 fi
 
 foreman_event_append "$ID" done "" "merged by the foreman: $PR"

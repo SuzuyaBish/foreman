@@ -17,6 +17,20 @@ foreman_die() {
   exit 1
 }
 
+# Point the record paths at a home handed in by a caller. A crew's shell does not
+# inherit FOREMAN_HOME, so its generated extension passes the foreman home
+# positionally; the derived paths are cached when this file is sourced, so
+# re-pointing FOREMAN_HOME alone would leave every reader looking at the old
+# home. Use this, never a bare `FOREMAN_HOME=$1`.
+foreman_use_home() { # <home>
+  [ -n "${1:-}" ] || foreman_die "foreman_use_home needs a home"
+  FOREMAN_HOME=$1
+  FOREMAN_TASKS="$FOREMAN_HOME/tasks"
+  FOREMAN_BOARD="$FOREMAN_HOME/BOARD.md"
+  FOREMAN_CONFIG="$FOREMAN_HOME/config.json"
+  export FOREMAN_HOME FOREMAN_TASKS FOREMAN_BOARD FOREMAN_CONFIG
+}
+
 foreman_session() { printf '%s' "$FOREMAN_SESSION"; }
 
 # Every Herdr call names its session. Ambient selection can silently address a

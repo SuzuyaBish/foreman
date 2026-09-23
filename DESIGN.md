@@ -134,6 +134,13 @@ with the source that produced it, so the foreman can tell "working" from "idle a
 its prompt" from "process gone" — which is the difference between supervising and
 guessing.
 
+The extension passes the foreman home explicitly, because a crew member's shell
+does not inherit `FOREMAN_HOME`. That home must be installed with
+`foreman_use_home`, never by assigning `FOREMAN_HOME` alone: the derived paths are
+cached when `foreman-lib.sh` is sourced, so a bare assignment leaves the writer
+pointing at the ambient home. Getting this wrong costs no error — the write just
+lands in the wrong place, and the crew reads as busy forever.
+
 A crew that has produced no event for `FOREMAN_STALL_SECS` (default 1800) while
 its task is unfinished and its pane is fine is a **stall**, whatever `crew_busy`
 says: idle at the prompt with nothing reported, or mid-turn with no progress. The
@@ -254,9 +261,14 @@ zero-token mechanics. Its shape follows from the design:
   `pi` and `lavish-axi` are external tools, so `tests/lib.sh` installs fakes for
   them first on `PATH`. The stub Herdr is per-pane files, which lets a test
   destroy a pane while keeping the tab — the churn recovery has to tell apart.
-  The one exception is `tests/crew-lavish-live.test.sh`, which starts a real
-  private `lavish-axi` server; it is gated behind `FOREMAN_LAVISH_E2E=1` so the
-  default suite stays hermetic.
+  The exceptions are the two live files: `tests/crew-lavish-live.test.sh`
+  (`FOREMAN_LAVISH_E2E=1`, a private `lavish-axi` server and browser-shaped
+  feedback) and `tests/crew-e2e-live.test.sh` (`FOREMAN_E2E=1`, a real Herdr pane,
+  a real pi crew, a real steer). Both skip by default so the suite stays
+  hermetic. The live wire file exists because stubs cannot see the class of bug
+  where every piece is individually correct and the wiring between them is not —
+  it found exactly one (`foreman_use_home`, see the busy state above) the first
+  time it ran.
 - **One file, one subject.** A test file stops at the first failed assertion and
   the runner reports one PASS/FAIL per file with its output, so a failure names
   the contract that broke rather than one assertion out of hundreds.
