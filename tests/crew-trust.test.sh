@@ -65,7 +65,25 @@ test_refusals_and_empty_state() {
   pass "bad input and an empty trust file are handled honestly"
 }
 
+# Parallel spawns each trust their new worktree at once; no entry may be lost.
+test_concurrent_trusts_all_land() {
+  local i dirs=() pids=() p
+  for i in $(seq 1 12); do dirs+=("$(fm_tmproot "trust-par-$i")"); done
+  for i in "${dirs[@]}"; do
+    "$TRUST" "$i" >/dev/null 2>&1 &
+    pids+=($!)
+  done
+  for p in "${pids[@]}"; do wait "$p" || fail "a concurrent trust failed"; done
+  jq -e . "$FILE" >/dev/null 2>&1 || fail "the trust file is not valid JSON"
+  for i in "${dirs[@]}"; do
+    assert_equals "true" "$(jq -r --arg p "$(cd "$i" && pwd -P)" '.[$p]' "$FILE")" "trust for $i survived its concurrent siblings"
+  done
+  assert_absent "$FILE.lock" "the trust lock is released"
+  pass "concurrent trusts of different paths all land"
+}
+
 test_trust_and_list
 test_trust_is_idempotent_and_normalises
 test_untrust
 test_refusals_and_empty_state
+test_concurrent_trusts_all_land

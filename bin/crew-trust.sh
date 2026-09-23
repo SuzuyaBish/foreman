@@ -14,24 +14,24 @@ set -eu
 
 TRUST_FILE=${PI_TRUST_FILE:-$HOME/.pi/agent/trust.json}
 
+# pi reads and writes this file too, and its own writes are outside our reach,
+# but foreman's writers are serialised: parallel spawns each trusting a new
+# worktree must not drop one another's entry.
 write_trust() { # <jq-filter> <arg>...
-  local filter=$1
+  local filter=$1 tmp lock ok=0
   shift
   mkdir -p "$(dirname "$TRUST_FILE")"
-  local tmp
   tmp="$TRUST_FILE.tmp.$$"
+  lock="$TRUST_FILE.lock"
+  foreman_lock_acquire "$lock" || foreman_die "could not lock $TRUST_FILE: $(foreman_lock_holder "$lock")"
   if [ -f "$TRUST_FILE" ]; then
-    jq "$@" "$filter" "$TRUST_FILE" >"$tmp" || {
-      rm -f "$tmp"
-      foreman_die "could not update $TRUST_FILE"
-    }
+    jq "$@" "$filter" "$TRUST_FILE" >"$tmp" && mv "$tmp" "$TRUST_FILE" && ok=1
   else
-    jq "$@" -n "$filter" >"$tmp" || {
-      rm -f "$tmp"
-      foreman_die "could not create $TRUST_FILE"
-    }
+    jq "$@" -n "$filter" >"$tmp" && mv "$tmp" "$TRUST_FILE" && ok=1
   fi
-  mv "$tmp" "$TRUST_FILE"
+  rm -f "$tmp"
+  foreman_lock_release "$lock"
+  [ "$ok" = 1 ] || foreman_die "could not update $TRUST_FILE"
 }
 
 case "${1:-}" in

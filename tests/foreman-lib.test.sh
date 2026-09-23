@@ -238,6 +238,25 @@ test_task_ids_are_sorted() {
   pass "the fleet listing order is deterministic"
 }
 
+# Meta is a read-modify-write of the whole file; fields set at once must all land.
+test_meta_set_concurrent() {
+  local k pids=() p
+  fm_task metarace >/dev/null
+  for k in alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima \
+    mike november oscar papa quebec romeo sierra tango; do
+    foreman_meta_set metarace "$k" "v-$k" &
+    pids+=($!)
+  done
+  for p in "${pids[@]}"; do wait "$p" || fail "a concurrent meta set failed"; done
+  for k in alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima \
+    mike november oscar papa quebec romeo sierra tango; do
+    assert_equals "v-$k" "$(foreman_meta_get metarace "$k")" "meta field $k survived its concurrent siblings"
+  done
+  assert_equals "harness=pi" "$(grep '^harness=' "$FOREMAN_HOME/tasks/metarace/meta")" "the existing fields survive"
+  assert_absent "$FOREMAN_HOME/tasks/metarace/.meta.lock" "the meta lock is released"
+  pass "twenty concurrent meta sets on different keys all land"
+}
+
 test_id_state_key_validation
 test_config
 test_project_and_paths
@@ -249,3 +268,4 @@ test_wake_queue
 test_busy_read
 test_epoch_and_age
 test_task_ids_are_sorted
+test_meta_set_concurrent

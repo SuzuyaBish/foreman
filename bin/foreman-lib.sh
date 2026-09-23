@@ -31,6 +31,83 @@ foreman_use_home() { # <home>
   export FOREMAN_HOME FOREMAN_TASKS FOREMAN_BOARD FOREMAN_CONFIG
 }
 
+# --- locks ------------------------------------------------------------------
+#
+# One writer at a time for a read-modify-write of a shared file. mkdir is atomic
+# on every filesystem this runs on, and macOS has no flock. The holder's pid is
+# written inside, so a waiter can tell a lock whose writer was killed from one
+# that is merely busy, and break it instead of waiting on a corpse. Breaking goes
+# through a second lock: two waiters that both see the same dead holder must not
+# both remove it, or the second removes the lock the first has just re-taken.
+# The wait is bounded (FOREMAN_LOCK_WAIT seconds) and the caller fails loudly
+# when it runs out; a write is never silently dropped.
+#
+# There is no EXIT trap in here: a trap that removes a lock can fire in a process
+# that never held it. Callers release explicitly on every path they can take.
+
+foreman_path_age() { # <path> -> seconds since last modified (0 when unknown)
+  local m
+  m=$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || date +%s)
+  printf '%s' "$(($(date +%s) - m))"
+}
+
+# A lock is stale when its recorded holder is gone. A lock with no pid yet is a
+# writer caught between mkdir and writing it, which takes microseconds, so it is
+# only stale once it is old.
+foreman_lock_is_stale() { # <lock-dir>
+  local pid=
+  [ -d "$1" ] || return 1
+  [ ! -f "$1/pid" ] || read -r pid <"$1/pid" 2>/dev/null || true
+  case "$pid" in
+  '' | *[!0-9]*) [ "$(foreman_path_age "$1")" -ge 5 ] ;;
+  *) ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1 ;;
+  esac
+}
+
+foreman_lock_break_stale() { # <lock-dir>
+  local brk="$1.break"
+  foreman_lock_is_stale "$1" || return 0
+  if ! mkdir "$brk" 2>/dev/null; then
+    # A breaker is killed only in the microseconds it holds this; clear an old one.
+    [ "$(foreman_path_age "$brk")" -lt 10 ] || rmdir "$brk" 2>/dev/null || true
+    return 0
+  fi
+  # Re-check under the break lock: only a dead holder or a breaker removes the
+  # lock, and this is the only breaker, so what is seen now cannot change.
+  if foreman_lock_is_stale "$1"; then
+    rm -f "$1/pid"
+    rmdir "$1" 2>/dev/null || true
+  fi
+  rmdir "$brk" 2>/dev/null || true
+}
+
+foreman_lock_acquire() { # <lock-dir> -> 0 held, 1 timed out
+  local tries=0 max
+  max=$((${FOREMAN_LOCK_WAIT:-10} * 20))
+  while :; do
+    if mkdir "$1" 2>/dev/null; then
+      printf '%s\n' "$$" >"$1/pid"
+      return 0
+    fi
+    foreman_lock_break_stale "$1"
+    tries=$((tries + 1))
+    [ "$tries" -lt "$max" ] || return 1
+    sleep 0.05
+  done
+}
+
+foreman_lock_release() { # <lock-dir>
+  rm -f "$1/pid"
+  rmdir "$1" 2>/dev/null || true
+}
+
+# Why a lock could not be taken, for the caller's die message.
+foreman_lock_holder() { # <lock-dir>
+  local pid=
+  [ ! -f "$1/pid" ] || read -r pid <"$1/pid" 2>/dev/null || true
+  printf 'held by pid %s; remove %s if that process is not a foreman writer' "${pid:-?}" "$1"
+}
+
 foreman_session() { printf '%s' "$FOREMAN_SESSION"; }
 
 # Every Herdr call names its session. Ambient selection can silently address a
@@ -223,16 +300,23 @@ foreman_meta_get() { # <id> <key>
   sed -n "s/^$2=//p" "$dir/meta" 2>/dev/null | head -1
 }
 
+# Read-modify-write under the task's meta lock, so two fields set at once (the
+# pr from a report, a pane id from a relaunch) cannot each drop the other.
 foreman_meta_set() { # <id> <key> <value>
-  local dir f tmp
+  local dir f tmp lock rc=0
   foreman_valid_key "$2" || foreman_die "bad meta key: $2"
   dir=$(foreman_require_task "$1") || return 1
   f="$dir/meta"
   tmp="$f.tmp.$$"
+  lock="$dir/.meta.lock"
+  foreman_lock_acquire "$lock" || foreman_die "could not lock $f: $(foreman_lock_holder "$lock")"
   {
     [ ! -f "$f" ] || grep -v "^$2=" "$f"
     printf '%s=%s\n' "$2" "$3"
-  } >"$tmp" && mv "$tmp" "$f"
+  } >"$tmp" && mv "$tmp" "$f" || rc=1
+  rm -f "$tmp"
+  foreman_lock_release "$lock"
+  return "$rc"
 }
 
 foreman_status_get() { # <id> <key>
