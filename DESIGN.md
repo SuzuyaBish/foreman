@@ -106,8 +106,9 @@ Verbs a crew member writes: `working`, `progress`, `blocked`, `needs-decision`,
 ## Wake
 
 `bin/crew-watch.sh` is a one-shot bash watcher: it blocks, compares state, polls
-pull requests, re-rings unacknowledged steers, and exits with one line when there
-is news. It does not decide anything durable — it appends to `.wake-queue`.
+pull requests, re-rings unacknowledged steers, sweeps lost endpoints, escalates
+stalls, and exits with one line when there is news. It does not decide anything
+durable — it appends to `.wake-queue`.
 
 The wake queue is the crash-proof part. Rows are sequenced and appended before
 anything is announced, and the foreman acknowledges them by sequence. If the
@@ -125,6 +126,13 @@ generation-bound record. `crew_busy <id>` returns `busy | idle | dead | unknown`
 with the source that produced it, so the foreman can tell "working" from "idle at
 its prompt" from "process gone" — which is the difference between supervising and
 guessing.
+
+A crew that has produced no event for `FOREMAN_STALL_SECS` (default 1800) while
+its task is unfinished and its pane is fine is a **stall**, whatever `crew_busy`
+says: idle at the prompt with nothing reported, or mid-turn with no progress. The
+watcher escalates it once per episode through a per-task `.stall-notified`
+marker; any progress rewrites the status timestamp, clears the marker, and makes
+a later stall news again. `0` disables the check.
 
 ## Steer reliability
 

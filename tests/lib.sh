@@ -468,6 +468,24 @@ fm_task() {
   printf '%s\n' "$dir"
 }
 
+# fm_iso_ago <seconds>: an ISO-8601 UTC timestamp that many seconds in the past.
+fm_iso_ago() {
+  local s=$1
+  if date -u -v-1S +%s >/dev/null 2>&1; then
+    date -u -v-"${s}"S +%Y-%m-%dT%H:%M:%SZ
+  else
+    date -u -d "@$(( $(date +%s) - s ))" +%Y-%m-%dT%H:%M:%SZ
+  fi
+}
+
+# fm_age_task <id> <seconds>: backdate a task's status so an age bound is met.
+fm_age_task() {
+  local f="$FOREMAN_HOME/tasks/$1/status" state note
+  state=$(sed -n 's/^state=//p' "$f")
+  note=$(sed -n 's/^note=//p' "$f")
+  printf 'state=%s\nat=%s\nnote=%s\n' "$state" "$(fm_iso_ago "$2")" "$note" >"$f"
+}
+
 # fm_attach_pane <id>: create a stub tab/pane and record it as the task's
 # endpoint, the way a launch would. Prints the pane id.
 fm_attach_pane() {

@@ -10,6 +10,7 @@
 #   * a pull request of a task in review being merged or closed;
 #   * a steer that has sat unacknowledged past the grace period, re-rung on a
 #     bounded ladder and then escalated;
+#   * a crew that is unfinished and has made no progress past the stall bound;
 #   * (once per run, at start) a task whose pane is gone while unfinished.
 #
 # Rows carry state and identifiers only. Crew output never reaches them.
@@ -29,6 +30,11 @@ STEER_GRACE=${FOREMAN_STEER_GRACE_SECS:-90}
 case "$STEER_GRACE" in '' | *[!0-9]*) STEER_GRACE=90 ;; esac
 STEER_MAX=${FOREMAN_STEER_MAX_RINGS:-3}
 case "$STEER_MAX" in '' | *[!0-9]*) STEER_MAX=3 ;; esac
+
+# How long an unfinished crew may go without a single event before it is a
+# stall. Generous on purpose: a legitimate long turn should not be flagged.
+STALL=${FOREMAN_STALL_SECS:-1800}
+case "$STALL" in '' | *[!0-9]*) STALL=1800 ;; esac
 
 ATTENTION=" review done failed blocked lost "
 
@@ -87,6 +93,36 @@ service_steers() {
   done
 }
 
+# A crew that is unfinished and quiet past the bound is stalled: idle at its
+# prompt with nothing reported, or mid-turn with no progress. Escalated once per
+# episode through .stall-notified, so the wake queue does not fill up with the
+# same fact every interval. Progress (any event rewrites the status timestamp)
+# clears the marker, so a later stall is news again.
+check_stalls() {
+  local id dir state busy age ago
+  [ "$STALL" -gt 0 ] || return 0
+  for id in $(foreman_task_ids); do
+    dir=$(foreman_task_dir "$id")
+    if [ "$(foreman_status_get "$id" state)" != working ]; then
+      rm -f "$dir/.stall-notified"
+      continue
+    fi
+    age=$(foreman_age_secs "$id" 2>/dev/null) || continue
+    if [ "$age" -lt "$STALL" ]; then
+      rm -f "$dir/.stall-notified"
+      continue
+    fi
+    [ -f "$dir/.stall-notified" ] && continue
+    # A lost endpoint is the endpoint sweep's business, not a stall.
+    busy=$(foreman_busy_read "$id" | cut -f1)
+    [ "$busy" = dead ] && continue
+    if [ "$age" -ge 60 ]; then ago="$((age / 60))m"; else ago="${age}s"; fi
+    foreman_queue_append state "$id stalled: $busy, no progress for $ago" >/dev/null || true
+    : >"$dir/.stall-notified"
+    printf '%s\n' "$id"
+  done
+}
+
 # A pane that is gone while its task is unfinished is the one thing that must be
 # caught even if nothing else changes: otherwise it reads as `working` forever.
 sweep_endpoints() {
@@ -113,6 +149,7 @@ while :; do
   service_steers
   sweep_endpoints
   cur=$(snapshot)
+  stalled=$(check_stalls)
 
   hits=""
   count=0
@@ -129,6 +166,13 @@ while :; do
   done <<EOF
 $cur
 EOF
+
+  for id in $stalled; do
+    count=$((count + 1))
+    if [ "$count" -le 3 ]; then
+      hits="${hits}${hits:+, }$id stalled"
+    fi
+  done
 
   if [ "$count" -gt 0 ]; then
     [ "$count" -le 3 ] || hits="$hits and $((count - 3)) more"

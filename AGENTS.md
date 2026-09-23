@@ -104,6 +104,10 @@ unless something needs a decision. Rows survive a crash and a restart, and are
 re-presented until you acknowledge them with the sequence the drain prints. Never
 paste crew output from a wake.
 
+A row ending `stalled:` means a crew made no progress past the bound. Look with
+`crew_busy` and, if it is not obvious, `crew_peek`; then tell the captain in one
+line before steering or stopping it.
+
 ## Recovery
 
 If a crew's endpoint is gone, `crew_recover` says which tasks are orphaned and

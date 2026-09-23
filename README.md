@@ -159,6 +159,12 @@ Every crew member is launched with a generated extension that reports its own
 turn lifecycle, so `crew_busy` answers `busy`, `idle`, `dead`, or `unknown` with
 the source that produced it — the difference between supervising and guessing.
 
+The watcher also escalates a **stall**: an unfinished crew that has produced no
+event for `FOREMAN_STALL_SECS` (default `1800`) while its pane is still fine.
+Idle at its prompt with nothing reported, or mid-turn with no progress — either
+way it raises one wake per episode, so a crew that quietly stopped cannot sit
+silent. Progress clears the episode; `0` disables the check.
+
 ## Lavish review boards
 
 `lavish-axi` turns an HTML artifact into a board you can annotate in the browser.
