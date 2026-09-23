@@ -206,6 +206,13 @@ requires, and the reason a blocking poll never holds a turn. A crew member
 building a visual deliverable uses a board by default and reports
 `needs-decision [key=board-url]` with the URL when the captain owes a review.
 
+Poll output is not forwarded whole. `lavish-axi` appends a full DOM serialization
+of the artifact, which is the largest part of the response and is not the
+feedback, so both tools replace the `dom_snapshot:` line with a marker and cap
+the remainder at the same ~4 KB ceiling every other result obeys. The live round
+trip is covered by an opt-in test rather than the hermetic suite, because it needs
+a real server.
+
 ## The chrome
 
 The status line and the crew widget are rendered from the task records on a
@@ -230,6 +237,9 @@ zero-token mechanics. Its shape follows from the design:
   `pi` and `lavish-axi` are external tools, so `tests/lib.sh` installs fakes for
   them first on `PATH`. The stub Herdr is per-pane files, which lets a test
   destroy a pane while keeping the tab — the churn recovery has to tell apart.
+  The one exception is `tests/crew-lavish-live.test.sh`, which starts a real
+  private `lavish-axi` server; it is gated behind `FOREMAN_LAVISH_E2E=1` so the
+  default suite stays hermetic.
 - **One file, one subject.** A test file stops at the first failed assertion and
   the runner reports one PASS/FAIL per file with its output, so a failure names
   the contract that broke rather than one assertion out of hundreds.

@@ -38,6 +38,14 @@ export default function (pi: any) {
   const BUSY = "__BUSY_EVENT__";
   const REPORT = "__REPORT__";
 
+  // `lavish-axi` results end with a full DOM serialization of the artifact. It
+  // is the largest part of the response and it is not the feedback, so trim it
+  // and cap the rest, the same way every other result reaching a model is capped.
+  const boundLavish = (raw: string) => {
+    const trimmed = raw.trim().replace(/^dom_snapshot: .*$/m, "dom_snapshot: …[trimmed]");
+    return trimmed.length > 4000 ? `${trimmed.slice(0, 4000)}\n…[capped at 4000 chars]` : trimmed;
+  };
+
   const report = (state: string, event: string) =>
     new Promise<void>((resolve) => {
       execFile(
@@ -136,7 +144,7 @@ export default function (pi: any) {
           [params.file],
           { cwd: process.cwd(), maxBuffer: 8 * 1024 * 1024 },
           (err: any, stdout: string, stderr: string) => {
-            const text = `${stdout || ""}${stderr || ""}`.trim();
+            const text = boundLavish(`${stdout || ""}${stderr || ""}`);
             resolve({
               content: [{ type: "text", text: text || String(err) }],
               details: undefined,
@@ -183,7 +191,7 @@ export default function (pi: any) {
         });
         child.on("exit", () => {
           poll = null;
-          const text = out.trim().slice(0, 60000);
+          const text = boundLavish(out);
           if (text) {
             try {
               pi.sendUserMessage(`Lavish board feedback:\n${text}`, { deliverAs: "followUp" });

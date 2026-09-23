@@ -190,6 +190,11 @@ the poll is a tracked background child of that session — the shape `lavish-axi
 requires, and the reason a long poll never holds a turn. Crew are told to use a
 board by default for visual work.
 
+Poll output ends with a full DOM serialization of the artifact, so both tools
+trim that line and cap the rest at ~4 KB before it reaches a model. The live
+path is opt-in tested: `FOREMAN_LAVISH_E2E=1 bin/crew-test.sh tests/crew-lavish-live.test.sh`
+starts a private `lavish-axi` server and runs the round trip.
+
 ## Tests
 
 ```sh

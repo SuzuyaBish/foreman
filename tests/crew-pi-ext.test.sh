@@ -58,6 +58,48 @@ JS
   pass "the crew_report tool drives the report script end to end"
 }
 
+test_the_poll_output_is_bounded() {
+  # `lavish-axi poll` appends a full DOM serialization. A crew's context must not
+  # receive it whole, so drive the generated lavish_poll against a fake that
+  # prints one huge snapshot line and check what actually gets delivered.
+  if ! command -v node >/dev/null 2>&1; then
+    pass "lavish_poll bound check skipped (no node)"
+    return 0
+  fi
+  fm_fakebin >/dev/null
+  cat >"$FM_FAKEBIN/lavish-axi" <<'SH'
+#!/usr/bin/env bash
+printf 'session:\n  status: feedback\nprompts[1]{uid,prompt,selector,tag,text}:\n  "u1","look at the header","#title",message,"Freeform message"\ndom_snapshot: "'
+printf 'x%.0s' $(seq 1 8000)
+printf '"\n'
+SH
+  chmod +x "$FM_FAKEBIN/lavish-axi"
+
+  local harness out len
+  harness=$(fm_tmproot poll-harness)/poll.mjs
+  cat >"$harness" <<'JS'
+const [, , file] = process.argv;
+const mod = await import(file);
+const tools = {};
+let sent = "";
+const pi = { on: () => {}, registerTool: (t) => { tools[t.name] = t; }, sendUserMessage: (m) => { sent = String(m); } };
+mod.default(pi);
+const res = await tools.lavish_poll.execute("c1", { file: "/tmp/whatever.html" });
+process.stdout.write("RESULT:" + (res.content?.[0]?.text ?? "") + "\n");
+process.stdout.write("SENT_LEN:" + sent.length + "\n");
+process.stdout.write("SENT_HAS_PROMPT:" + (sent.includes("look at the header") ? "yes" : "no") + "\n");
+process.stdout.write("SENT_HAS_DOM:" + (sent.includes("dom_snapshot: …[trimmed]") ? "yes" : "no") + "\n");
+JS
+  out=$(node "$harness" "$FOREMAN_HOME/tasks/e1/pi-ext.ts")
+  assert_contains "$out" "board feedback delivered" "the poll reports delivery"
+  assert_contains "$out" "SENT_HAS_PROMPT:yes" "the prompt itself still reaches the crew"
+  assert_contains "$out" "SENT_HAS_DOM:yes" "the DOM dump is replaced by a marker"
+  len=$(printf '%s\n' "$out" | sed -n 's/^SENT_LEN://p')
+  [ -n "$len" ] || fail "the harness reported no delivered length"
+  [ "$len" -le 4300 ] || fail "the delivered feedback is not bounded (got $len bytes)"
+  pass "lavish_poll trims the DOM snapshot and bounds what the crew sees"
+}
+
 test_generates_a_bound_extension() {
   fm_task e1 queued >/dev/null
   local gen file body
@@ -135,3 +177,4 @@ test_exposes_the_expected_tools
 test_generation_is_validated
 test_the_generated_file_parses
 test_the_report_tool_drives_the_script
+test_the_poll_output_is_bounded

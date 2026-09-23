@@ -34,6 +34,16 @@ const TODO = path.join(HOME, "todo.tsv");
 /** Hard ceiling on anything a tool may put into the foreman's context. */
 const CAP = 4000;
 
+/**
+ * `lavish-axi` results end with a full DOM serialization of the artifact. It is
+ * the largest part of the response and it is not the feedback, so trim that line
+ * and cap the rest, the same way every other tool result is capped.
+ */
+function boundLavish(raw: string): string {
+	const trimmed = raw.trim().replace(/^dom_snapshot: .*$/m, "dom_snapshot: …[trimmed]");
+	return trimmed.length > CAP ? `${trimmed.slice(0, CAP)}\n…[capped at ${CAP} chars]` : trimmed;
+}
+
 function run(script: string, args: string[], cap = CAP): Promise<string> {
 	return new Promise((resolve, reject) => {
 		execFile(
@@ -429,7 +439,7 @@ const lavishPoll = defineTool({
 		if (lavishChild) {
 			return { content: [{ type: "text", text: "already polling — feedback is on its way" }], details: undefined };
 		}
-		return await new Promise((resolve) => {
+		return await new Promise<any>((resolve) => {
 			let child: ChildProcess;
 			try {
 				child = spawn("lavish-axi", ["poll", params.file], {
@@ -451,7 +461,7 @@ const lavishPoll = defineTool({
 			child.on("exit", () => {
 				lavishChild = null;
 				resolve({
-					content: [{ type: "text", text: out.trim().slice(0, 4000) || "board closed" }],
+					content: [{ type: "text", text: boundLavish(out) || "board closed" }],
 					details: undefined,
 				});
 			});
