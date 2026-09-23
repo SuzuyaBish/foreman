@@ -12,6 +12,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 fm_home >/dev/null
 fm_herdr_stub >/dev/null
+fm_pi_agent_dir >/dev/null
 fm_pi_stub >/dev/null
 fm_git_isolate
 
@@ -223,6 +224,28 @@ test_double_dash_and_model_options() {
   pass "task text and per-crew model options are handled"
 }
 
+test_spawn_records_the_config_model() {
+  # The model a crew runs on is recorded where recovery reads it, even when it
+  # came from config rather than a flag: a relaunch must land on the same model.
+  local dir runs
+  dir=$(fm_tmproot config-model)
+  "$BIN/crew-config.sh" set crewModel cfg-provider/cfg-model >/dev/null
+  "$BIN/crew-config.sh" set crewThinking low >/dev/null
+  "$SPAWN" cfgmodel "$dir" "config model task" >/dev/null
+  assert_equals "cfg-provider/cfg-model" "$(meta_of cfgmodel model)" "the config model is recorded in meta"
+  assert_equals "low" "$(meta_of cfgmodel thinking)" "the config thinking level is recorded in meta"
+  runs=$(fm_herdr_pane_runs | grep "cfgmodel")
+  assert_contains "$runs" "--model cfg-provider/cfg-model" "the config model reaches the launch command"
+  assert_contains "$runs" "--thinking low" "the config thinking level reaches the launch command"
+
+  "$SPAWN" flagmodel "$dir" --model flag-model "flag model task" >/dev/null
+  assert_equals "flag-model" "$(meta_of flagmodel model)" "a flag beats config and is what is recorded"
+  assert_equals "low" "$(meta_of flagmodel thinking)" "an unflagged thinking level still comes from config"
+  "$BIN/crew-config.sh" unset crewModel >/dev/null
+  "$BIN/crew-config.sh" unset crewThinking >/dev/null
+  pass "spawn records the effective model and thinking level in meta"
+}
+
 test_spawn_surfaces_uncommitted_checkout_work() {
   local proj out
   proj="$FOREMAN_PROJECTS/dirtysource"
@@ -339,6 +362,7 @@ test_a_spawn_that_names_the_item_labels_the_workspace
 test_project_without_isolation
 test_arguments_are_validated
 test_double_dash_and_model_options
+test_spawn_records_the_config_model
 test_spawn_surfaces_uncommitted_checkout_work
 test_spawn_surfaces_a_stale_base
 test_reuse_warning_for_a_linked_item

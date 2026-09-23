@@ -78,6 +78,124 @@ foreman_config_bool() { # <key> <default-0-or-1>
   esac
 }
 
+# --- the captain's pi packages ----------------------------------------------
+#
+# A crew runs pi with discovery off (`-ne`, see crew-launch.sh), and that also
+# drops every package the captain installed globally - including the ones that
+# provide model providers, so a crew model such as claude-bridge/... cannot
+# resolve. These helpers read the packages from the captain's global pi settings
+# and name each one's installed directory, so the launcher can hand them back to
+# pi with `-e`. Only the global (user) list is read: project-local packages and
+# extensions stay excluded, which is the point of `-ne`.
+#
+# An installed directory is passed rather than the `npm:` source, because pi
+# treats an `-e npm:...` as a temporary package and runs an npm install for it on
+# every launch. A package that is not installed is skipped, never installed here.
+# Nothing in this section may fail a launch: a missing or unreadable settings
+# file simply yields no packages.
+
+foreman_pi_agent_dir() {
+  local d=${PI_CODING_AGENT_DIR:-}
+  if [ -z "$d" ]; then
+    printf '%s/.pi/agent' "$HOME"
+    return 0
+  fi
+  case "$d" in
+  "~") d=$HOME ;;
+  \~/*) d="$HOME/${d#\~/}" ;;
+  esac
+  printf '%s' "$d"
+}
+
+# Where pi installs a user-scope package source. Mirrors pi's package manager:
+# npm under <agent>/npm/node_modules/<name>, git under <agent>/git/<host>/<path>,
+# and a local path relative to the agent directory. Prints nothing for a source
+# it does not recognise.
+foreman_pi_package_root() { # <agent-dir> <source>
+  local agent=$1 src=$2 spec rest host path
+  case "$src" in
+  npm:*)
+    spec=${src#npm:}
+    case "$spec" in
+    @*/*)
+      rest=${spec#*/}
+      printf '%s/npm/node_modules/%s/%s' "$agent" "${spec%%/*}" "${rest%%@*}"
+      ;;
+    ?*) printf '%s/npm/node_modules/%s' "$agent" "${spec%%@*}" ;;
+    esac
+    ;;
+  git:* | http:* | https:* | ssh:*)
+    rest=${src#git:}
+    rest=${rest#*://}
+    case "$rest" in git@*:*)
+      rest=${rest#git@}
+      rest="${rest%%:*}/${rest#*:}"
+      ;;
+    esac
+    rest=${rest%%#*}
+    host=${rest%%/*}
+    host=${host##*@}
+    path=${rest#*/}
+    path=${path%%@*}
+    path=${path%/}
+    path=${path%.git}
+    [ -z "$host" ] || [ -z "$path" ] || [ "$path" = "$rest" ] ||
+      printf '%s/git/%s/%s' "$agent" "$host" "$path"
+    ;;
+  github:* | file:*) ;;
+  "~") printf '%s' "$HOME" ;;
+  \~/*) printf '%s/%s' "$HOME" "${src#\~/}" ;;
+  /*) printf '%s' "$src" ;;
+  ?*) printf '%s/%s' "$agent" "${src#./}" ;;
+  esac
+}
+
+# The extension paths of the captain's global pi packages, one per line, in the
+# order the settings list them. A plain string entry loads its whole package. An
+# object entry is a filtered package: `extensions: []` or `autoload: false` with
+# no extension list turns its extensions off, so it is skipped; a list of plain
+# paths is passed file by file; a list with glob or +/-/! patterns cannot be said
+# on the command line, so the whole package is passed instead of silently losing
+# a provider.
+foreman_pi_package_exts() {
+  local agent settings kind src rel root p seen=$'\n'
+  agent=$(foreman_pi_agent_dir)
+  settings="$agent/settings.json"
+  [ -f "$settings" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  while IFS=$'\t' read -r kind src rel; do
+    [ -n "$src" ] || continue
+    root=$(foreman_pi_package_root "$agent" "$src")
+    [ -n "$root" ] || continue
+    case "$kind" in
+    file) p="$root/${rel#./}" ;;
+    *) p=$root ;;
+    esac
+    [ -e "$p" ] || continue
+    case "$seen" in *$'\n'"$p"$'\n'*) continue ;; esac
+    seen="$seen$p"$'\n'
+    printf '%s\n' "$p"
+  done <<EOF
+$(jq -r '
+    (.packages // []) | if type == "array" then .[] else empty end
+    | if type == "string" then ["pkg", ., ""]
+      elif type == "object" and (.source | type) == "string" then
+        .source as $s
+        | if has("extensions") then
+            .extensions as $e
+            | if ($e | type) != "array" then ["pkg", $s, ""]
+              elif ($e | length) == 0 then empty
+              elif all($e[]; type == "string" and (test("^[!+-]|[*?\\[{]") | not))
+              then ($e[] | ["file", $s, .])
+              else ["pkg", $s, ""] end
+          elif .autoload == false then empty
+          else ["pkg", $s, ""] end
+      else empty end
+    | @tsv' "$settings" 2>/dev/null)
+EOF
+  return 0
+}
+
 # --- projects and worktrees ----------------------------------------------
 
 # A project argument is either a name under projects/ or an explicit path.

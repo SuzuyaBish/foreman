@@ -798,3 +798,31 @@ zero-token mechanics. Its shape follows from the design:
   pins both halves — including that the captain still gets everything, since a
   guard that makes the extension inert for everyone would be a worse bug.
   The consequence for users: a crew never loads a project's own pi extensions.
+
+- **`-ne` also drops the captain's global packages, and with them model
+  providers.** Discovery off means pi skips the `packages` in
+  `~/.pi/agent/settings.json` too. A package such as `pi-claude-bridge` is what
+  provides the `claude-bridge` provider, so `crewModel=claude-bridge/...` died at
+  once with `Model ... not found`, and a crew with no `--model` silently fell back
+  to whatever pi could resolve instead of the captain's `defaultProvider`. The
+  launcher therefore reads the global (user-scope) `packages` list with jq
+  (`foreman_pi_package_exts` in `bin/foreman-lib.sh`) and names each installed
+  package back with `-e <installed dir>`, after the crew's own extension so the
+  crew's tools register first. It passes the installed directory, not the
+  `npm:` source: pi treats a CLI `-e npm:...` as a temporary package and runs an
+  npm install for it on every launch. A package that is not installed is
+  skipped, never installed. A filtered entry (`{source, extensions}`) passes the
+  files it names, is skipped when its extensions are turned off, and falls back
+  to the whole package when its filter uses patterns the command line cannot
+  express. Project-scope packages and `.pi/extensions` stay off — that is what
+  `-ne` is for — and so do loose files in `~/.pi/agent/extensions` (none are
+  needed today; add them the same way if that changes). A missing, malformed or
+  oddly shaped settings file yields no packages and never fails a launch.
+  `PI_CODING_AGENT_DIR` is honoured, which is how `tests/crew-launch.test.sh`
+  points it at a fixture.
+
+- **A relaunch runs on the task's model, then config.** Spawn records the
+  effective `model` and `thinking` in the task's meta (flag, else `crewModel` /
+  `crewThinking`). `crew-recover.sh --relaunch` reads meta first and falls back
+  to the current config, recording what it used, so a task spawned before
+  `crewModel` was set does not come back on pi's default.

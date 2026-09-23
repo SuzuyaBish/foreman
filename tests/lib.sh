@@ -552,6 +552,19 @@ fm_gh_calls() { cat "$GH_STUB_STATE/calls" 2>/dev/null || true; }
 
 # --- fake pi ----------------------------------------------------------------
 
+# fm_pi_agent_dir: point pi's global state (settings.json, installed packages)
+# at a throwaway directory, so a launch reads a fixture instead of the captain's
+# own ~/.pi/agent. Call it bare, not in $( ): it exports PI_CODING_AGENT_DIR.
+# Prints the directory. Not part of fm_home: the live tests run a real pi, which
+# needs the captain's real agent directory.
+fm_pi_agent_dir() {
+  local dir
+  dir=$(fm_tmproot fm-pi-agent) || return 1
+  PI_CODING_AGENT_DIR=$dir
+  export PI_CODING_AGENT_DIR
+  printf '%s\n' "$dir"
+}
+
 fm_pi_stub() {
   fm_fakebin || return 1
   cat >"$FM_FAKEBIN/pi" <<'SH'

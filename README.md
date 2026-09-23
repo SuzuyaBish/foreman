@@ -153,7 +153,11 @@ history.
 
 Crew sessions are started with extension discovery off, so a project's own pi
 extensions never load inside a crew: a crew gets exactly the tools it was
-generated with, and can never inherit the captain's.
+generated with, and can never inherit the captain's. The packages installed
+globally in `~/.pi/agent/settings.json` (`"packages"`) are named back in
+explicitly, from their installed directories, so a crew has the same model
+providers and package tools as the captain's own pi — `crewModel` can name a
+provider that a package supplies, such as `claude-bridge/...`.
 
 A worktree is cut from the project's `HEAD`, so uncommitted work in that
 checkout is not carried into it. Spawning warns when that would happen, naming
@@ -166,7 +170,7 @@ Told conversationally ("run the crew on X, thinking high"), persisted in
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `crewModel` | pi's default | model every crew member runs on |
+| `crewModel` | pi's default | model every crew member runs on; recorded per task, and a recovery relaunch falls back to it |
 | `crewThinking` | pi's default | `low`…`max` |
 | `crewDelivery` | `auto` | `pr`, `local`, or `report` |
 | `crewIsolate` | `true` | worktree per crew member for project work |
