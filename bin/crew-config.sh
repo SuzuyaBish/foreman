@@ -26,6 +26,25 @@ is_bool_key() {
   return 1
 }
 
+# Every write is a read-modify-write of the whole file, so it happens under one
+# lock. Without it two `set`s fired at once each read the old file and the last
+# mv won: the first key was lost and the next crew ran on the wrong model. The
+# temp file sits beside config.json so the mv is an atomic rename.
+config_write() { # <jq-args>... <filter>
+  local lock="$FOREMAN_CONFIG.lock" tmp="$FOREMAN_CONFIG.tmp.$$" ok=0
+  mkdir -p "$FOREMAN_HOME"
+  foreman_lock_acquire "$lock" ||
+    foreman_die "could not lock $FOREMAN_CONFIG: $(foreman_lock_holder "$lock"); nothing was written"
+  if [ -f "$FOREMAN_CONFIG" ]; then
+    jq "$@" "$FOREMAN_CONFIG" >"$tmp" && mv "$tmp" "$FOREMAN_CONFIG" && ok=1
+  else
+    jq -n "$@" >"$tmp" && mv "$tmp" "$FOREMAN_CONFIG" && ok=1
+  fi
+  rm -f "$tmp"
+  foreman_lock_release "$lock"
+  [ "$ok" = 1 ] || foreman_die "could not update $FOREMAN_CONFIG; nothing was written"
+}
+
 ACTION=${1:-show}
 case "$ACTION" in
 show)
@@ -45,35 +64,23 @@ set)
   V=${3:-}
   valid_key "$K" || foreman_die "unknown config key: ${K:-<none>} (keys: $KEYS)"
   [ -n "$V" ] || foreman_die "usage: crew-config.sh set <key> <value>"
-  TMP="$FOREMAN_CONFIG.tmp.$$"
-  mkdir -p "$FOREMAN_HOME"
   if is_bool_key "$K"; then
     case "$V" in
     true | 1 | yes | on) V=true ;;
     false | 0 | no | off) V=false ;;
     *) foreman_die "$K takes true or false, got: $V" ;;
     esac
-    if [ -f "$FOREMAN_CONFIG" ]; then
-      jq --arg k "$K" --argjson v "$V" '.[$k] = $v' "$FOREMAN_CONFIG" >"$TMP"
-    else
-      jq -n --arg k "$K" --argjson v "$V" '{($k): $v}' >"$TMP"
-    fi
+    config_write --arg k "$K" --argjson v "$V" '.[$k] = $v'
   else
-    if [ -f "$FOREMAN_CONFIG" ]; then
-      jq --arg k "$K" --arg v "$V" '.[$k] = $v' "$FOREMAN_CONFIG" >"$TMP"
-    else
-      jq -n --arg k "$K" --arg v "$V" '{($k): $v}' >"$TMP"
-    fi
+    config_write --arg k "$K" --arg v "$V" '.[$k] = $v'
   fi
-  mv "$TMP" "$FOREMAN_CONFIG"
   printf '%s=%s\n' "$K" "$V"
   ;;
 unset)
   K=${2:-}
   valid_key "$K" || foreman_die "unknown config key: ${K:-<none>} (keys: $KEYS)"
   [ -f "$FOREMAN_CONFIG" ] || exit 0
-  TMP="$FOREMAN_CONFIG.tmp.$$"
-  jq --arg k "$K" 'del(.[$k])' "$FOREMAN_CONFIG" >"$TMP" && mv "$TMP" "$FOREMAN_CONFIG"
+  config_write --arg k "$K" 'del(.[$k])'
   printf 'unset %s\n' "$K"
   ;;
 *)
