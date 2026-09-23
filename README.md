@@ -365,3 +365,7 @@ FOREMAN_E2E=1 FOREMAN_E2E_REPO=<owner>/<name> \
 
 State lives in `.foreman/` (gitignored); `FOREMAN_HOME` relocates it and
 `FOREMAN_SESSION` picks a named Herdr session (default `default`).
+
+## License
+
+[MIT](LICENSE).
