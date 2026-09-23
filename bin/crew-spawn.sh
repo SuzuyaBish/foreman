@@ -181,40 +181,62 @@ case "$DELIVERY" in pr | local | report) ;; *) foreman_die "unknown delivery mod
 QHOME="FOREMAN_HOME=$(printf '%q' "$FOREMAN_HOME")"
 INBOX_CMD="$QHOME $(printf '%q' "$FOREMAN_ROOT/bin/crew-inbox.sh") $ID"
 
+# A brief and its delivery sections are prose, and prose is data: their templates
+# are written with quoted heredocs so the shell expands nothing inside them, and
+# the few real values are interpolated through explicit __TOKEN__s. A backtick or
+# `$(...)` in a template is then literal text, never a command. This is the same
+# contract crew-pi-ext.sh uses for its generated extension. The substitution is a
+# bash parameter expansion, whose replacement is literal (unlike sed, where `&`
+# and the delimiter would need escaping). __TASK__ is filled last so that a task
+# that happens to contain another token is never rescanned.
+brief_fill() {
+  local out=$1 token value
+  shift
+  while [ $# -ge 2 ]; do
+    token=$1
+    value=$2
+    shift 2
+    out=${out//"$token"/"$value"}
+  done
+  printf '%s' "$out"
+}
+
 case "$DELIVERY" in
 pr)
-  DELIVERY_BLOCK=$(cat <<EOF
+  DELIVERY_BLOCK=$(cat <<'EOF'
 ## Finishing
 
 The change is not delivered until the captain merges a pull request for it. It
-lives on branch \`crew/$ID\` in an isolated git worktree.
+lives on branch `crew/__ID__` in an isolated git worktree.
 
 1. Commit everything on the branch; leave nothing uncommitted.
-2. Push it:  git push -u origin crew/$ID
+2. Push it:  git push -u origin crew/__ID__
 3. Open a pull request:
      gh pr create --title "<short title>" --body "<what changed, why, how you verified it>"
-4. Record it and finish with the \`crew_report\` tool:
+4. Record it and finish with the `crew_report` tool:
      crew_report(verb="review", note="<one-line summary>", pr="<the pull request url>")
 
 Do not merge it — the captain does that. Leave the worktree, the branch and the
 commits exactly as they are; they are cleaned up after the merge.
 EOF
 )
+  DELIVERY_BLOCK=$(brief_fill "$DELIVERY_BLOCK" '__ID__' "$ID")
   ;;
 local)
-  DELIVERY_BLOCK=$(cat <<EOF
+  DELIVERY_BLOCK=$(cat <<'EOF'
 ## Finishing
 
-Your work is on branch \`crew/$ID\`. Commit everything, then finish with:
+Your work is on branch `crew/__ID__`. Commit everything, then finish with:
 
   crew_report(verb="done", note="<one-line summary>")
 
 Do not push and do not open a pull request. Leave the branch in place.
 EOF
 )
+  DELIVERY_BLOCK=$(brief_fill "$DELIVERY_BLOCK" '__ID__' "$ID")
   ;;
 report)
-  DELIVERY_BLOCK=$(cat <<EOF
+  DELIVERY_BLOCK=$(cat <<'EOF'
 ## Finishing
 
 The deliverable is the report file. Finish with:
@@ -228,33 +250,33 @@ EOF
   ;;
 esac
 
-cat >"$DIR/brief.md" <<EOF
-# Crew task: $ID
+BRIEF_TEMPLATE=$(cat <<'BRIEF'
+# Crew task: __ID__
 
 You are a crew member. You were assigned this by the captain's foreman. Nobody
 is watching your terminal; the captain reads your report file.
 
 ## Task
 
-$TASK
+__TASK__
 
 ## Working directory
 
-$CWD
+__CWD__
 
 ## Report
 
 Write your result to:
 
-  $DIR/report.md
+  __DIR__/report.md
 
 Keep it tight and decision-shaped: what you did or found, the evidence, what is
 still unresolved. This file is the deliverable.
 
 Everything the foreman and the captain see from you goes through the
-\`crew_report\` tool — there is no bash command to remember.
+`crew_report` tool — there is no bash command to remember.
 
-$DELIVERY_BLOCK
+__DELIVERY_BLOCK__
 
 ## Decisions
 
@@ -266,7 +288,7 @@ Then stop and wait. The captain's answer arrives in your inbox as a resolved
 decision; check the inbox before resuming. Reuse the same key if you have to ask
 again about the same thing.
 
-If you simply cannot proceed, use \`blocked\` instead:
+If you simply cannot proceed, use `blocked` instead:
 
   crew_report(verb="blocked", note="<one-line reason>")
 
@@ -275,13 +297,13 @@ If you simply cannot proceed, use \`blocked\` instead:
 Dev servers, file watchers, test runners, emulators, browsers, anything you put
 in the background: stop them before you finish. They outlive this task, they
 hold ports and CPU, and once the task is archived nothing on the machine knows
-they were ever yours. The \`crew_cleanup\` tool lists what is still running in
+they were ever yours. The `crew_cleanup` tool lists what is still running in
 your working directory and stops it:
 
   crew_cleanup(action="check")     what is still up
   crew_cleanup(action="kill")      stop it
 
-A \`review\` or \`done\` report is refused while anything is still running, so do
+A `review` or `done` report is refused while anything is still running, so do
 this before you report. A Lavish board is the one exception: it stays up while
 the captain annotates it, and stops itself when that review is over.
 
@@ -289,11 +311,11 @@ the captain annotates it, and stops itself when that review is over.
 
 The foreman can send more instructions at any time. They land in:
 
-  $DIR/inbox/
+  __DIR__/inbox/
 
 Check for them between significant steps:
 
-  $INBOX_CMD
+  __INBOX_CMD__
 
 That prints every unacknowledged instruction and marks it handled. Run it before
 starting anything long, and again after finishing a step.
@@ -301,21 +323,21 @@ starting anything long, and again after finishing a step.
 ## Visual work
 
 If your deliverable is visual — a UI mock, a plan, a comparison, a review surface
-— build it as an HTML artifact and open a Lavish board with the \`lavish_open\`
-tool, then call \`lavish_poll\` once and leave it running. The captain annotates
+— build it as an HTML artifact and open a Lavish board with the `lavish_open`
+tool, then call `lavish_poll` once and leave it running. The captain annotates
 the page and the feedback comes back to you.
 
 Build the board from our own template, not from scratch:
 
-  $FOREMAN_ROOT/assets/board-template.html
-  $FOREMAN_ROOT/bin/crew-board.sh new <out.html>      (copies the template)
+  __FOREMAN_ROOT__/assets/board-template.html
+  __FOREMAN_ROOT__/bin/crew-board.sh new <out.html>      (copies the template)
 
 Lavish draws no pick UI of its own. The artifact declares its own choices: a
-\`<form data-lavish-question="…">\` with radios and a "Queue answer" button, or
+`<form data-lavish-question="…">` with radios and a "Queue answer" button, or
 checkbox rows with a bottom "Queue dispatch order" bar. Call
-\`window.lavish.queuePrompt()\` exactly once, from that explicit submit — never
+`window.lavish.queuePrompt()` exactly once, from that explicit submit — never
 on change. A board with no pick blocks is not ready to open: `lavish_open` runs
-\`crew-board.sh check\` first and refuses it. The template demonstrates both
+`crew-board.sh check` first and refuses it. The template demonstrates both
 shapes, working.
 
 Tell the captain to queue his answers, then press the composer's red
@@ -328,11 +350,21 @@ After opening the board, record what you need reviewed with:
 
 ## Rules
 
-- Work only inside $CWD unless the task says otherwise.
-- Do not ask the captain questions in chat. Use the \`crew_report\` tool.
+- Work only inside __CWD__ unless the task says otherwise.
+- Do not ask the captain questions in chat. Use the `crew_report` tool.
 - A done status with no report is a failed task.
 - Never merge a pull request yourself.
-EOF
+BRIEF
+)
+
+printf '%s\n' "$(brief_fill "$BRIEF_TEMPLATE" \
+  '__ID__' "$ID" \
+  '__CWD__' "$CWD" \
+  '__DIR__' "$DIR" \
+  '__INBOX_CMD__' "$INBOX_CMD" \
+  '__FOREMAN_ROOT__' "$FOREMAN_ROOT" \
+  '__DELIVERY_BLOCK__' "$DELIVERY_BLOCK" \
+  '__TASK__' "$TASK")" >"$DIR/brief.md"
 
 {
   printf 'harness=pi\n'
