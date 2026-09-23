@@ -787,22 +787,44 @@ function startWatcher(pi: ExtensionAPI) {
 	child.on("exit", restart);
 }
 
-function countPending(): number {
+/**
+ * How many acked rows the queue has already given up: the sequence in
+ * `.wake-acked`, or 0 when there is none. The file only exists after a first
+ * drain, so a missing one means "nothing acked yet", never "nothing to do".
+ */
+function ackedSequence(): number {
 	try {
-		const raw = fs.readFileSync(path.join(HOME, ".wake-queue"), "utf8");
-		const acked = Number.parseInt(
-			fs.readFileSync(path.join(HOME, ".wake-acked"), "utf8").trim() || "0",
-			10,
-		);
-		let n = 0;
-		for (const line of raw.split("\n")) {
-			const seq = Number.parseInt(line.split("\t")[0] ?? "", 10);
-			if (Number.isFinite(seq) && seq > (Number.isFinite(acked) ? acked : 0)) n++;
-		}
-		return n;
+		const raw = fs.readFileSync(path.join(HOME, ".wake-acked"), "utf8").trim();
+		const n = Number.parseInt(raw || "0", 10);
+		return Number.isFinite(n) ? n : 0;
 	} catch {
 		return 0;
 	}
+}
+
+/**
+ * Rows waiting for the foreman, mirroring `foreman_queue_pending` in
+ * foreman-lib.sh. The two must agree: this number is the reason the foreman
+ * takes a turn at all. They did not agree once, and it cost every wake on a
+ * fresh home - both file reads sat in one try, so the ENOENT from a
+ * not-yet-existing `.wake-acked` answered "no wakes". Nothing was announced, so
+ * nothing was drained, so the ack file was never created, so no wake was ever
+ * announced. `tests/crew-wake.test.sh` pins the two together on one fixture.
+ */
+function countPending(): number {
+	const acked = ackedSequence();
+	let raw: string;
+	try {
+		raw = fs.readFileSync(path.join(HOME, ".wake-queue"), "utf8");
+	} catch {
+		return 0;
+	}
+	let n = 0;
+	for (const line of raw.split("\n")) {
+		const seq = Number.parseInt((line.split("\t")[0] ?? "").trim(), 10);
+		if (Number.isFinite(seq) && seq > acked) n++;
+	}
+	return n;
 }
 
 export default function foreman(pi: ExtensionAPI) {

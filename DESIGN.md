@@ -128,6 +128,20 @@ reloading, the rows are still there and are re-presented on the next session
 start. The injected message carries no payload: it says how many rows are
 waiting, and the foreman drains them.
 
+The announcement is a **wake**, not context: it is sent as a user message, so it
+spends a turn. That is the whole difference from the session digest, which is
+injected with `triggerTurn: false` and costs nothing — a wake that did not spend
+a turn would be a wake nobody reads, which is the failure this distinction
+exists to prevent, and `tests/crew-wake.test.sh` pins both halves of it.
+
+Acked means: every row at or before the sequence in `.wake-acked` is done. That
+file is written by the first drain and does not exist before it, so "no ack file"
+must read as "nothing acked yet" — **not** as "nothing to do". Getting that
+backwards deadlocks the feature on a fresh home: nothing is announced, so nothing
+is drained, so the ack file is never created. The extension keeps its own count
+because it runs on the watcher's exit and at session start, and that count is
+pinned to `foreman_queue_pending` by the same test.
+
 ## Busy state
 
 Herdr can say whether a pane exists and whether an agent is registered, but not
