@@ -457,6 +457,31 @@ test_the_chrome_is_scoped_to_the_project_in_focus() {
   pass "the chrome reads the project in focus and never another project's backlog"
 }
 
+# The scope in focus decides which *items* the chrome lists, but a crew row is
+# about the fleet. A crew working in another project must keep the number and
+# title of the item it is on, rather than falling back to the placeholders that
+# mean "genuinely unlinked". Found live: a crew deploying in a project scope
+# while the board read `foreman` rendered as `-  (no todo item)`.
+test_a_crew_outside_the_focus_keeps_its_item() {
+  local h out widget other
+  h=$(fm_tmproot chrome-crossscope)/home
+  mkdir -p "$h"
+  printf 'foreman\n' >"$h/focus.default"
+  mkdir -p "$h/tasks/c-other"
+  printf 'project=%s\n' "/tmp/projects/Example_App" >"$h/tasks/c-other/meta"
+  printf 'state=working\nat=%s\nnote=deploying\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$h/tasks/c-other/status"
+  printf '42\tactive\tc-other\tdeploy the backend\t-\tExample_App\n' >"$h/todo.tsv"
+
+  out=$(node "$HARNESS" "$EXTDIR/foreman.ts" "$h") || fail "the extension would not render: $out"
+  widget=$(printf '%s\n' "$out" | sed -n 's/^WIDGET|//p')
+  other=$(printf '%s\n' "$widget" | grep -F "c-other")
+
+  assert_contains "$other" "#42" "a crew outside the focus keeps its item's number"
+  assert_contains "$other" "deploy the backend" "a crew outside the focus keeps its item's title"
+  assert_not_contains "$other" "(no todo item)" "a linked crew never claims to have no item"
+  pass "a crew working outside the focus keeps its number and title"
+}
+
 test_calm_mode_hides_the_foremans_tool_calls() {
   local off again
   off=$(field CALM_CUSTOM_OFF)
@@ -812,6 +837,7 @@ test_a_hidden_builtin_tool_row_leaves_no_blank_line
 test_the_vendored_calm_module_loads_under_pis_jiti
 test_the_crew_command_completes_its_arguments
 test_the_chrome_is_scoped_to_the_project_in_focus
+test_a_crew_outside_the_focus_keeps_its_item
 test_a_linked_item_folds_into_its_crews_row_and_the_budget_holds
 test_a_crew_and_its_item_render_as_one_row
 test_the_status_column_honours_the_crews_own_busy_record
