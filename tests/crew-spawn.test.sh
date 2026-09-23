@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC1010  # "done" is a subcommand argument here, not a loop terminator.
+# shellcheck disable=SC2016  # the brief's backticks and $( ) are literal prose the test asserts on.
 # crew-spawn.test.sh - creating one crew member.
 #
 # Spawn is where the sealed-context contract is established: the brief is the
@@ -63,6 +64,43 @@ test_plain_directory_spawn() {
   assert_contains "$launched" "-e $TASKDIR/first/pi-ext.ts" "the crew's own extension is still named explicitly"
   assert_contains "$launched" "FOREMAN_CREW=first" "the session is marked as a crew for anything it starts later"
   pass "a spawn seals the task, arms busy and launches one agent"
+}
+
+test_brief_prose_is_data_not_shell() {
+  local dir err brief
+  dir=$(fm_tmproot brief-prose)
+  err=$(mktemp)
+  # The stub Herdr meets a real spawn, so the brief template is evaluated here.
+  # An unescaped backtick or `$( )` in the prose would run a command and print
+  # to stderr. Capture stderr on its own: the original defect was invisible
+  # because stdout stayed clean and every other test only read stdout. `--delivery
+  # pr` also exercises the second generated template (the finishing block), which
+  # must fill its branch name without leaving a token behind.
+  "$SPAWN" brief-prose "$dir" --delivery pr 'echo $(id) `id`' 2>"$err" >/dev/null
+  assert_equals "" "$(cat "$err")" "spawning prints nothing on stderr"
+
+  brief=$(cat "$TASKDIR/brief-prose/brief.md")
+  # The exact sentence that #42's rewrite left a hole in, with the line wrap it
+  # renders at. Its backticked tokens are the shape that broke: the shell ran
+  # `lavish_open`, found nothing, and substituted the empty string.
+  assert_contains "$brief" 'A board with no pick blocks is not ready to open: `lavish_open` runs
+`crew-board.sh check` first and refuses it.' \
+    "the Lavish sentence survives with both backticked tokens"
+  assert_not_contains "$brief" 'not ready to open:  runs' \
+    "the Lavish sentence has no hole where the command used to run"
+  assert_contains "$brief" '`window.lavish.queuePrompt()` exactly once' "a backticked call survives verbatim"
+  assert_contains "$brief" '`<form data-lavish-question="…">` with radios' "backticked markup with an attribute survives"
+  assert_contains "$brief" 'through the
+`crew_report` tool' "the reporting tool is backticked and present"
+  # A task is data too: shell metacharacters in it are never re-expanded.
+  assert_contains "$brief" 'echo $(id) `id`' "task text with shell metacharacters is literal"
+  # The finishing block's own template was filled, not dumped raw.
+  assert_contains "$brief" 'lives on branch `crew/brief-prose`' "the delivery branch is filled in"
+  assert_not_contains "$brief" '__ID__' "no __ID__ token leaks into the brief"
+  assert_not_contains "$brief" '__TASK__' "no __TASK__ token leaks into the brief"
+  assert_not_contains "$brief" '__DELIVERY_BLOCK__' "no block token leaks into the brief"
+  rm -f "$err"
+  pass "the brief is prose as data: nothing expands, nothing hits stderr"
 }
 
 test_delivery_mode_detection() {
@@ -294,6 +332,7 @@ test_workspace_resolution() {
 }
 
 test_plain_directory_spawn
+test_brief_prose_is_data_not_shell
 test_delivery_mode_detection
 test_isolation_uses_a_worktree
 test_a_spawn_that_names_the_item_labels_the_workspace
