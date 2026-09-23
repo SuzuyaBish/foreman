@@ -61,6 +61,26 @@ review_worktree_task() {
   printf '%s\n' "$wt"
 }
 
+# attach_home <id>: record the workspace and tab this foreman created for a
+# crew, with its pane registered there, exactly as a launch leaves it. Prints
+# the pane id.
+attach_home() { # <id>
+  local id=$1 out ws tab pane
+  fm_herdr_seed_workspace ws-parent skills
+  out=$(herdr --session "${FOREMAN_SESSION:-default}" workspace create \
+    --label "└ $id" --cwd /tmp --no-focus)
+  ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
+  tab=$(printf '%s' "$out" | jq -r '.result.tab.tab_id')
+  pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
+  {
+    printf 'workspace=%s\nparent_workspace=ws-parent\n' "$ws"
+    printf 'tab=%s\npane=%s:%s\n' "$tab" "${FOREMAN_SESSION:-default}" "$pane"
+  } >>"$FOREMAN_HOME/tasks/$id/meta"
+  printf '%s\n' "$pane"
+}
+
+workspace_of() { sed -n 's/^workspace=//p' "$FOREMAN_HOME/tasks/$1/meta" | head -1; }
+
 test_delete_branch_refuses_a_dirty_worktree() {
   local proj wt before_calls
   proj="$FOREMAN_PROJECTS/dirtyrepo"
@@ -140,11 +160,55 @@ test_merge_settles_the_task() {
   review_task m3 42
   local out
   out=$("$MERGE" m3)
-  assert_equals "merged 42 (squash)" "$out" "the default method is squash"
+  assert_contains "$out" "merged 42 (squash)" "the default method is squash"
   assert_equals "done" "$(state_of m3)" "a merged task is done"
   assert_contains "$(note_of m3)" "merged by the foreman: 42" "the settlement names the merge"
   assert_contains "$(fm_gh_calls)" "pr merge 42 --squash" "gh was asked for a squash merge"
   pass "a merge settles the task and uses the requested method"
+}
+
+test_a_successful_merge_closes_the_crews_home() {
+  local pane ws out
+  review_task mc1 55
+  pane=$(attach_home mc1)
+  ws=$(workspace_of mc1)
+  out=$("$MERGE" mc1)
+  assert_equals "done" "$(state_of mc1)" "the merge still settles the task"
+  assert_contains "$out" "closed its workspace" "the merge reports the close"
+  assert_contains "$(fm_herdr_calls)" "workspace close $ws" "the crew's workspace was closed on merge"
+  assert_absent "$HERDR_STUB_STATE/pane-$pane" "the idle pane goes with the workspace"
+  assert_present "$FOREMAN_HOME/tasks/mc1" "the record stays in the active set"
+  assert_absent "$FOREMAN_HOME/archive/mc1" "a merge never archives the task"
+  pass "a successful merge closes the home the crew lived in"
+}
+
+test_an_unreachable_herdr_never_undermines_the_merge() {
+  local pane out
+  review_task mc3 57
+  pane=$(attach_home mc3)
+  out=$(PATH=$(fm_path_without herdr) "$MERGE" mc3)
+  assert_equals "done" "$(state_of mc3)" "the merge stands with Herdr unreachable"
+  assert_contains "$out" "merged 57" "the merge is still reported"
+  assert_contains "$out" "could not close its terminal" "the failed close is a warning, not a failure"
+  assert_present "$HERDR_STUB_STATE/pane-$pane" "nothing is invented as closed"
+  pass "an unreachable Herdr leaves the merge result standing"
+}
+
+test_a_blocked_merge_keeps_the_crews_home() {
+  local pane ws
+  review_task mc2 56
+  pane=$(attach_home mc2)
+  ws=$(workspace_of mc2)
+  printf '1\n' >"$GH_STUB_STATE/merge-exit"
+  printf 'HTTP 403: Resource not accessible by integration (mergePullRequest)\n' \
+    >"$GH_STUB_STATE/merge-reason"
+  fm_gh_pr_state OPEN
+  if "$MERGE" mc2 >/dev/null 2>&1; then fail "a refused merge reported success"; fi
+  assert_equals "blocked" "$(state_of mc2)" "the refused merge blocks the task"
+  assert_present "$HERDR_STUB_STATE/pane-$pane" "the pane the crew still needs survives"
+  assert_not_contains "$(fm_herdr_calls)" "workspace close $ws" "no close is attempted"
+  rm -f "$GH_STUB_STATE/merge-exit" "$GH_STUB_STATE/merge-reason" "$GH_STUB_STATE/pr.json"
+  pass "a refused merge leaves the crew's home open"
 }
 
 test_methods() {
@@ -373,6 +437,9 @@ test_missing_gh_is_refused() {
 
 test_merge_requires_review
 test_merge_settles_the_task
+test_a_successful_merge_closes_the_crews_home
+test_a_blocked_merge_keeps_the_crews_home
+test_an_unreachable_herdr_never_undermines_the_merge
 test_methods
 test_failed_merge_is_visible
 test_failed_merge_keeps_gh_reason

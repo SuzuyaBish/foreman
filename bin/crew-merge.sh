@@ -108,9 +108,28 @@ while [ "$ATTEMPT" -lt "$ATTEMPTS" ]; do
 done
 
 if [ "$MERGED" = 1 ]; then
+  # A merged crew is finished: its record and branch survive for the captain,
+  # but the idle pane must not sit in the fleet reading as work still running.
+  # Close the home the foreman created for it -- workspace, else tab -- the same
+  # best-effort close crew-archive performs. Like archive this reads the
+  # workspace and tab from the task's own meta, so it runs before the record is
+  # touched; a Herdr that cannot be reached is reported, never fatal, because
+  # the merge already happened and stands on its own.
+  close_note="nothing was left to close"
+  if [ -n "$(foreman_own_workspace "$ID")" ] || [ -n "$(foreman_meta_get "$ID" tab)" ] || [ -n "$(foreman_meta_get "$ID" pane)" ]; then
+    if command -v herdr >/dev/null 2>&1; then
+      case "$(foreman_close_home "$ID")" in
+      workspace) close_note="closed its workspace" ;;
+      tab) close_note="closed its tab" ;;
+      *) close_note="nothing was left to close" ;;
+      esac
+    else
+      close_note="could not close its terminal (herdr is not on PATH)"
+    fi
+  fi
   foreman_event_append "$ID" done "" "merged by the foreman: $PR"
   foreman_status_sync "$ID"
-  printf 'merged %s (%s)\n' "$PR" "$METHOD"
+  printf 'merged %s (%s); %s\n' "$PR" "$METHOD" "$close_note"
   exit 0
 fi
 
