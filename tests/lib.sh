@@ -7,6 +7,13 @@
 # touching a live Herdr session, a real repository, or the captain's pi state.
 set -u
 
+# The suite must be hermetic even when it is run from a crew member (the
+# self-hosted case): FOREMAN_CREW is set in a crew's environment, and the
+# captain-side extension tests would otherwise load the extension, see the
+# marker, and register nothing. Unset once, at source time, so every test and
+# every child process it starts sees the captain's environment.
+unset FOREMAN_CREW
+
 # shellcheck disable=SC2034 # ROOT and BIN are consumed by the sourcing tests.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC2034

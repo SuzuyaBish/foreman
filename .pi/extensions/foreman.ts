@@ -85,6 +85,32 @@ function run(script: string, args: string[], cap = CAP): Promise<string> {
 	});
 }
 
+/**
+ * House scripts read and write the chart under FOREMAN_HOME. The extension knows
+ * the resolved home even when the ambient shell did not export one, so the
+ * house tools pass it explicitly rather than relying on the scripts' default.
+ * The scripts own validation; these tools only forward arguments.
+ */
+function runHouse(script: string, args: string[], cap = CAP): Promise<string> {
+	return new Promise((resolve, reject) => {
+		execFile(
+			path.join(BIN, script),
+			args,
+			{ cwd: ROOT, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, FOREMAN_ROOT: ROOT, FOREMAN_HOME: HOME } },
+			(error, stdout, stderr) => {
+				const body = `${stdout ?? ""}${stderr ?? ""}`.trim();
+				const text =
+					body.length > cap ? `${body.slice(0, cap)}\n…[capped at ${cap} chars]` : body;
+				if (error && !stdout) {
+					reject(new Error(text || String(error)));
+					return;
+				}
+				resolve(text || "(no output)");
+			},
+		);
+	});
+}
+
 function one(name: string, label: string, description: string, parameters: any, script: string, args: (p: any) => string[]) {
 	return defineTool({
 		name,
@@ -456,6 +482,175 @@ const crewHandoff = one(
 	"crew-handoff.sh",
 	(p) => (p.text ? ["write", p.text] : ["show"]),
 );
+
+// --- House: the chart and the prescription ---------------------------------
+//
+// House is foreman's sibling: the same repo, a different discipline. These tools
+// only ever examine, diagnose, prescribe, and (on explicit say-so) send. None of
+// them spawn, merge, archive, edit or run an area's work. An area is an ongoing
+// thread the captain keeps - a repo, a project in its own chat, a deck, a craft -
+// not a git project and not a crew task.
+
+const houseAreas = defineTool({
+	name: "house_areas",
+	label: "House areas",
+	description:
+		"The chart of ongoing areas. `list` (default) shows every active area as one " +
+		"line; `add` starts a chart for a new area (slug, title, kind, where, bind, " +
+		"status, next); `archive` retires an area out of the active list without " +
+		"deleting it. An area is any thread the captain keeps: a repo, a project in " +
+		"its own chat, a deck or talk, a craft. It is not a git project and not a crew " +
+		"task.",
+	parameters: Type.Object({
+		action: Type.Optional(Type.String({ description: "list (default) | add | archive" })),
+		slug: Type.Optional(Type.String({ description: "Short kebab-case area name" })),
+		title: Type.Optional(Type.String({ description: "For add: human title" })),
+		kind: Type.Optional(Type.String({ description: "For add: repo | chat | deck | craft | other" })),
+		where: Type.Optional(Type.String({ description: "For add: path, url, chat or pane" })),
+		bind: Type.Optional(Type.String({ description: "For add: how to reach a live session (a crew task id)" })),
+		status: Type.Optional(Type.String({ description: "For add: one line on where it stands" })),
+		next: Type.Optional(Type.String({ description: "For add: the diagnosed next step" })),
+	}),
+	async execute(_id, params) {
+		const action = params.action ?? "list";
+		if (action === "add") {
+			if (!params.slug) throw new Error("add needs slug");
+			const args = ["add", params.slug];
+			if (params.title) args.push("--title", params.title);
+			if (params.kind) args.push("--kind", params.kind);
+			if (params.where) args.push("--where", params.where);
+			if (params.bind) args.push("--bind", params.bind);
+			if (params.status) args.push("--status", params.status);
+			if (params.next) args.push("--next", params.next);
+			return { content: [{ type: "text", text: await runHouse("house-area.sh", args, 800) }], details: undefined };
+		}
+		if (action === "archive") {
+			if (!params.slug) throw new Error("archive needs slug");
+			return { content: [{ type: "text", text: await runHouse("house-area.sh", ["archive", params.slug], 800) }], details: undefined };
+		}
+		const text = await runHouse("house-area.sh", ["list"]);
+		return { content: [{ type: "text", text }], details: undefined };
+	},
+});
+
+const houseVisit = defineTool({
+	name: "house_visit",
+	label: "Visit an area",
+	description:
+		"Read one area's whole chart: its fields and its dated log. Visiting is how House " +
+		"answers what is going on with a thread before diagnosing it.",
+	parameters: Type.Object({ slug: Type.String({ description: "The area slug" }) }),
+	async execute(_id, params) {
+		return { content: [{ type: "text", text: await runHouse("house-area.sh", ["show", params.slug]) }], details: undefined };
+	},
+});
+
+const houseNote = defineTool({
+	name: "house_note",
+	label: "Chart a change",
+	description:
+		"Append a dated note to an area's chart and bump its updated date, when the " +
+		"captain says something changed. `status` and `next` also set those fields in " +
+		"the same act. Notes are one line: that is what keeps the rounds honest.",
+	parameters: Type.Object({
+		slug: Type.String({ description: "The area slug" }),
+		text: Type.String({ description: "One line on what changed" }),
+		status: Type.Optional(Type.String({ description: "Also set the status line" })),
+		next: Type.Optional(Type.String({ description: "Also set the diagnosed next step" })),
+	}),
+	async execute(_id, params) {
+		const args = [params.slug];
+		if (params.status) args.push("--status", params.status);
+		if (params.next) args.push("--next", params.next);
+		args.push(params.text);
+		return { content: [{ type: "text", text: await runHouse("house-note.sh", args, 800) }], details: undefined };
+	},
+});
+
+const houseNext = defineTool({
+	name: "house_next",
+	label: "Diagnose next",
+	description:
+		"Set (or clear) an area's diagnosed next step - the one line a prescription is " +
+		"built around. Use it after visiting an area and working out what should happen " +
+		"next; keep it to one specific line.",
+	parameters: Type.Object({
+		slug: Type.String({ description: "The area slug" }),
+		text: Type.Optional(Type.String({ description: "The next step; omit with clear" })),
+		clear: Type.Optional(Type.Boolean({ description: "Clear the next step instead" })),
+	}),
+	async execute(_id, params) {
+		if (params.clear) {
+			return { content: [{ type: "text", text: await runHouse("house-next.sh", [params.slug, "--clear"], 800) }], details: undefined };
+		}
+		if (!params.text) throw new Error("house_next needs text (or clear)");
+		return { content: [{ type: "text", text: await runHouse("house-next.sh", [params.slug, params.text], 800) }], details: undefined };
+	},
+});
+
+const houseRounds = defineTool({
+	name: "house_rounds",
+	label: "Take the rounds",
+	description:
+		"The physician's rounds: one line per area with its status and next step. " +
+		"Areas with no next step, or one not touched for a while, are marked. Call it " +
+		"when you open a house session, and when the captain asks where everything " +
+		"stands. `all` includes archived areas; `digest` prints one summary line.",
+	parameters: Type.Object({
+		all: Type.Optional(Type.Boolean({ description: "Include archived areas" })),
+		stale_days: Type.Optional(Type.Number({ description: "Days before an area is stale" })),
+		digest: Type.Optional(Type.Boolean({ description: "One summary line only" })),
+	}),
+	async execute(_id, params) {
+		const args: string[] = [];
+		if (params.all) args.push("--all");
+		if (params.stale_days !== undefined) args.push("--stale-days", String(params.stale_days));
+		if (params.digest) args.push("--digest");
+		return { content: [{ type: "text", text: await runHouse("house-rounds.sh", args) }], details: undefined };
+	},
+});
+
+const housePrescribe = defineTool({
+	name: "house_prescribe",
+	label: "Write a prescription",
+	description:
+		"Assemble the ready-to-paste prompt for an area from its chart: what it is, " +
+		"where it stands, the diagnosed next step, and the captain's conventions. It " +
+		"is written to the outbox and returned; `copy` also puts it on the clipboard, " +
+		"and `stdout` skips the outbox write.",
+	parameters: Type.Object({
+		slug: Type.String({ description: "The area slug" }),
+		copy: Type.Optional(Type.Boolean({ description: "Also copy to the clipboard" })),
+		stdout: Type.Optional(Type.Boolean({ description: "Skip the outbox write" })),
+		context: Type.Optional(Type.String({ description: "A file to append as extra context" })),
+	}),
+	async execute(_id, params) {
+		const args = [params.slug];
+		if (params.copy) args.push("--copy");
+		if (params.stdout) args.push("--stdout");
+		if (params.context) args.push("--context", params.context);
+		return { content: [{ type: "text", text: await runHouse("house-prescribe.sh", args) }], details: undefined };
+	},
+});
+
+const houseSend = defineTool({
+	name: "house_send",
+	label: "Send a prescription",
+	description:
+		"Deliver an area's latest prescription to the session named by its bind (a " +
+		"crew task id), through the same durable inbox the crew machinery uses. Dry " +
+		"run unless `yes` is true, and only when the captain has said to send. An area " +
+		"with no usable bind is refused; prescribe with copy and paste it instead.",
+	parameters: Type.Object({
+		slug: Type.String({ description: "The area slug" }),
+		yes: Type.Optional(Type.Boolean({ description: "Actually send; otherwise dry run" })),
+	}),
+	async execute(_id, params) {
+		const args = [params.slug];
+		if (params.yes) args.push("--yes");
+		return { content: [{ type: "text", text: await runHouse("house-send.sh", args) }], details: undefined };
+	},
+});
 
 // --- Lavish ----------------------------------------------------------------
 
@@ -857,6 +1052,13 @@ export default function foreman(pi: ExtensionAPI) {
 		crewWakeDrain,
 		crewDoctor,
 		crewHandoff,
+		houseAreas,
+		houseVisit,
+		houseNote,
+		houseNext,
+		houseRounds,
+		housePrescribe,
+		houseSend,
 		lavishOpen,
 		lavishPoll,
 	]) {
@@ -930,6 +1132,23 @@ export default function foreman(pi: ExtensionAPI) {
 			}
 		} catch {
 			/* the board still renders */
+		}
+		// A house session opens on the rounds instead of the fleet: it knows every
+		// area, so it takes their pulse before the captain asks. Only a house session
+		// gets this, so the foreman's digest is not polluted with another model's
+		// chart.
+		if (process.env.FOREMAN_MODE === "house") {
+			try {
+				const rounds = (await runHouse("house-rounds.sh", [], 4000)).trim();
+				if (rounds) {
+					pi.sendMessage(
+						{ customType: "house-rounds", content: rounds, display: false },
+						{ triggerTurn: false },
+					);
+				}
+			} catch {
+				/* the chart may be empty or unreadable; the session still opens */
+			}
 		}
 		updateChrome(ctx);
 		startWatcher(pi);

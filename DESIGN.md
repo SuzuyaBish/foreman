@@ -52,11 +52,16 @@ This is the whole design. Everything else is plumbing.
 ```
 foreman/
   AGENTS.md              standing instructions loaded into the foreman session
+  HOUSE.md               who House is and how to enter house mode
   .pi/extensions/foreman.ts
                          the model-facing tools, auto wake, and crew chrome.
                          Project-local, so pi discovers it whenever it runs in
                          this directory; trust the project once per clone.
+  .pi/skills/house/SKILL.md
+                         the attending-physician framing for a house session
   bin/foreman            convenience: create the project dirs, then start pi
+  bin/house              convenience: the same session in house mode
+  bin/house-*.sh         the chart, rounds, prescribe and send mechanics
   bin/*.sh               zero-token mechanics
   bin/herdr-workspace-move.mjs  the one socket call `herdr workspace` lacks
   bin/crew-test.sh       runs the behaviour suite
@@ -84,6 +89,10 @@ foreman/
     handoff.md           the dated note the previous session left
     .handoff-seen        the timestamp of the last handoff ingested
     BOARD.md             generated status board
+    house/               House: the chart of ongoing areas (gitignored)
+      areas/<slug>.md    one area: key: value header + an append-only dated log
+      archived/<slug>.md charts retired out of the active rounds (never deleted)
+      outbox/<slug>-<ts>.md  prescriptions that were written
 ```
 
 ## Events, decisions, and current state
@@ -363,6 +372,54 @@ The derivation lives in `crew-todo.sh` for the tools and again in the extension
 for the chrome — the chrome renders every 15 seconds and must not fork a shell to
 find out which project it is looking at. `tests/crew-chrome.test.sh` asserts both
 resolve the same scope on one fixture, so the two cannot drift apart.
+
+## House
+
+Foreman runs the crew. House is its sibling: it keeps a chart of the captain's
+**areas** and writes prescriptions. It is entered from the same repo (`bin/house`,
+or `FOREMAN_MODE=house pi`) and reuses the same extension, but it is a *mode*, not
+a second foreman — the crew machinery stays underneath and house does not use it.
+
+**Why it does nothing.** A know-it-all registrar is only useful if it is
+incapable of acting. The moment House can spawn, merge or run, it becomes a
+second, worse foreman with its own notion of what is in flight, and the captain
+has two places to look for the same truth. So the tools it is given cannot spawn,
+merge, archive, edit or execute; the skill states the same discipline; and the
+only write House performs on the world is a *prompt* — a prescription — which the
+captain pastes, or tells House to deliver. The prescription is self-contained on
+purpose: a fresh chat has none of this conversation, so the chart has to carry
+enough to rebuild the context. The send path reuses `crew-send.sh`'s durable
+inbox record and doorbell rather than inventing a second delivery mechanism, so a
+sent prescription is exactly as reliable as a crew steer — and it is opt-in, one
+area at a time, because sending is the one act that is hard to take back.
+
+**Why areas are not projects.** The todo list and the crew are about work that
+*finishes*: an item is opened, a crew member runs in a worktree, a pull request
+lands, the task is archived. An area is a thread that *stays open* — a repo, a
+project that lives in its own chat, a deck, a craft like branding. It has no
+task id, no worktree and often no repository at all, and its truth cannot be
+derived from git. Forcing it into the todo list would give it a lifecycle it does
+not have and would file threads the captain thinks about under a project scope
+that does not exist. So areas live in their own chart, under
+`$FOREMAN_HOME/house/`, plain text and greppable, and the only thing shared with
+the crew machinery is the inbox a prescription is delivered through.
+
+**The chart.** One file per area, `house/areas/<slug>.md`: `key: value` header
+lines (`slug`, `title`, `kind`, `where`, `bind`, `opened`, `updated`, `status`,
+`next`) and then an append-only dated log. Plain text because it must be
+editable by hand and readable by `sed`; append-only because the interesting
+question is what changed, not only what is current. `kind` drives delivery —
+`repo` means a branch and a pull request, everything else means a report — which
+is the one place an area's shape changes what House prescribes. `updated` is
+bumped by every note and every diagnosis, and `rounds` marks an area that has not
+moved or has no `next`, so a thread cannot rot silently. Archiving retires a
+chart from the active rounds but never deletes it; a thread that comes back keeps
+its history.
+
+**House is additive.** No existing script was changed to make room for it. The
+scripts are new files, the state is a new directory, the tools are new
+registrations, and the session-start rounds are injected only when
+`FOREMAN_MODE=house`, so foreman's digest is untroubled.
 
 ## The chrome
 

@@ -31,6 +31,7 @@ Read [DESIGN.md](DESIGN.md) for the context contract. It is the point.
 - [Busy state](#busy-state)
 - [Teardown](#teardown)
 - [Lavish review boards](#lavish-review-boards)
+- [House](#house)
 - [What you can ask the foreman for](#what-you-can-ask-the-foreman-for)
 - [Pieces](#pieces)
 - [Tests](#tests)
@@ -386,10 +387,96 @@ trim that line and cap the rest at ~4 KB before it reaches a model. The live
 path is opt-in tested: `FOREMAN_LAVISH_E2E=1 bin/crew-test.sh tests/crew-lavish-live.test.sh`
 starts a private `lavish-axi` server and runs the round trip.
 
+## House
+
+The physician beside the foreman. Foreman runs the crew; **House keeps the
+chart and writes prescriptions.** It knows every *area* you work on — a repo, a
+project that lives in its own chat, a deck or talk, a craft like branding or the
+design skill — and it does nothing to any of them. It examines, diagnoses,
+prescribes and, only when you say so, sends a prompt to a session already
+working there.
+
+An area is **not** a git project and **not** a crew task. It is any ongoing
+thread you keep in your head: *the four Nedbank chats*, *the investor pitch*,
+*roboteur*. You name them; their truth lives in House's chart under
+`$FOREMAN_HOME/house/areas/<slug>.md` — plain text, greppable, yours to edit —
+not in git. This is the difference that matters: the crew machinery owns tasks
+that finish, House owns threads that stay open.
+
+Enter house mode from the same checkout:
+
+```sh
+bin/house           # or: FOREMAN_MODE=house pi
+```
+
+House is a *mode beside foreman*, not a second foreman. The crew machinery stays
+untouched underneath and house simply does not use it: in house mode nothing is
+spawned, merged, archived, edited or executed. A house session opens on the
+rounds, so it starts knowing the areas. The [`house` skill](.pi/skills/house/SKILL.md)
+frames the work; [HOUSE.md](HOUSE.md) is who House is.
+
+### The loop
+
+```
+> track the investor pitch as a deck
+> the deck is out for review, next is to tighten the ask
+> rounds
+
+  roboteur        repo   2d   status: parser merged, flags half done  next: add --dry-run
+  investor-pitch  deck   1d   status: out for review                  next: tighten the ask
+  expo-talk       deck   9d   status: slides started                  next: -  [no next]
+
+> what's next for expo-talk?
+  ... diagnoses the chart, sets the step, and prints a prompt ready to paste
+> send that to expo-talk
+```
+
+House's four verbs are the whole job: **examine, diagnose, prescribe, send on
+command.** When work should happen, House writes the prescription and hands it
+over; it never does the work itself.
+
+### House commands
+
+Each is a zero-token script; the `house_*` tools in the extension are thin
+wrappers over them. Every command takes `--help`.
+
+| Command | Verbs | Does |
+|---|---|---|
+| `bin/house-area.sh` | `add` `list` `show` `archive` | the chart: open an area, see them, read one, retire one |
+| `bin/house-note.sh` | `--status` `--next` | append a dated note and bump `updated` |
+| `bin/house-next.sh` | `--clear` | set or clear the diagnosed next step |
+| `bin/house-rounds.sh` | `--all` `--stale-days` `--digest` | one line per area; mark stale or no-next |
+| `bin/house-prescribe.sh` | `--copy` `--stdout` `--context` | write the paste-ready prompt to the outbox |
+| `bin/house-send.sh` | `--yes` | dry-run, or deliver the latest prescription to `bind` |
+
+A chart is a few `key: value` header lines and an append-only dated log:
+
+```
+  slug: roboteur
+  title: Roboteur
+  kind: repo
+  where: ~/code/roboteur
+  bind: roboteur-crew
+  opened: 2026-06-01
+  updated: 2026-06-03
+  status: parser merged; CLI flags half done
+  next: add --dry-run and a test for it
+
+  ## Log
+
+  - 2026-06-03 - closed the parser PR
+```
+
+Prescriptions land in `.foreman/house/outbox/<slug>-<ts>.md`; `--copy` puts them
+on the clipboard (`pbcopy`, `xclip` or `wl-copy`, degrading with a message), and
+`house-send.sh` delivers one through the same durable inbox a crew steer uses
+when the area's `bind` names a crew task.
+
 ## What you can ask the foreman for
 
 These are the foreman's hands. You never call one yourself: you say what you
-want ("put that on the list", "stop the auth one") and it picks the tool.
+want ("put that on the list", "stop the auth one") and it picks the tool. In
+house mode the same session answers with the `house_*` tools further down.
 
 | Tool | What it does |
 |---|---|
@@ -413,6 +500,19 @@ want ("put that on the list", "stop the auth one") and it picks the tool.
 | `crew_doctor` | check this machine, before or during a session |
 | `lavish_open` / `lavish_poll` | put up a review board / read your annotations |
 
+In house mode, the same conversation is answered with the physician's tools.
+None of them spawn, merge, archive, edit or run anything:
+
+| Tool | What it does |
+|---|---|
+| `house_areas` | the chart: `list`, `add` an area, or `archive` one |
+| `house_visit <slug>` | read one area's whole chart |
+| `house_note <slug>` | chart a change; may set status and next |
+| `house_next <slug>` | set (or clear) the diagnosed next step |
+| `house_rounds` | one line per area, staleness and no-next marked |
+| `house_prescribe <slug>` | assemble the paste-ready prompt, and outbox it |
+| `house_send <slug>` | dry-run, or send the latest prescription to `bind` |
+
 A crew member gets its own tools: `crew_report` (its state, its decision, its
 PR) and `crew_cleanup` (stop what it started, so nothing is left holding a
 port), plus the `lavish_*` pair below. `/crew` prints the board, `/crew on|off`
@@ -423,6 +523,7 @@ toggles the widget.
 | Command | Does |
 |---|---|
 | `bin/foreman` | start the foreman session |
+| `bin/house` | start a session in house mode |
 | `bin/crew-todo.sh` | the durable project list |
 | `bin/crew-spawn.sh <id> --project <p> <task…>` | worktree + pane + fresh pi |
 | `bin/crew-list.sh` | todo + crew board; regenerates `BOARD.md` |
