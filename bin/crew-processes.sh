@@ -31,7 +31,8 @@
 # checkout, so whatever was already running there when the crew launched is
 # excluded through `snapshot`.
 #
-# Never touched: the crew's agent and everything still descended from it, the
+# Never touched: the probe itself and the shells that invoked it, the crew's
+# agent and everything still descended from it, the
 # agent's ancestors (the pane shell, and the multiplexer above it), and
 # `lavish-axi`, whose own contract is to stay up while the captain annotates a
 # board and to stop itself when the last session ends.
@@ -112,19 +113,28 @@ proc_cwd_pids() { # <anchor> -> pids, one per line
   ' "$LSOF_OUT" | sort -u
 }
 
-# Pids that must never be reported or stopped: the agent, its descendants (MCP
-# servers, a tool call still in flight) and its ancestors (the pane shell). The
-# two sets are built separately on purpose - expanding ancestors and then
-# descendants would protect every sibling in the session, which is the whole
-# multiplexer's worth of processes.
+# Pids that must never be reported or stopped: the probe itself, the shells
+# that invoked it, the agent and its descendants (MCP servers, a tool call still
+# in flight) and its ancestors (the pane shell). The two sets are built
+# separately on purpose - expanding ancestors and then descendants would protect
+# every sibling in the session, which is the whole multiplexer's worth of
+# processes.
 proc_protected() {
-  awk '
+  awk -v self="$$" '
     {
       pid = $1 + 0; ppid = $2 + 0
       cmd = $0; sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]+/, "", cmd)
       PP[pid] = ppid; CMD[pid] = cmd; ALL[pid] = 1
     }
     END {
+      # The probe runs with the crew directory (the anchor) as its cwd, so the
+      # cwd scan lists the probe itself and the shells that invoked it. They are
+      # on the reporting path, never crew work, and must be excluded whatever
+      # process tree they happen to sit in. Seeding `self` protects it and them
+      # explicitly; leaning on the agent seed below is not enough, because a
+      # detached probe (parent PID 1, no `pi` above it) would otherwise find and
+      # blame itself - the scan it takes is not a stray it left.
+      if (self != "") SEED[self + 0] = 1
       for (p in ALL) {
         if (CMD[p] ~ /(^|\/)pi([ \t]|$)/ || CMD[p] ~ /agent-device[ \t]+mcp/ || CMD[p] ~ /lavish-axi/) SEED[p] = 1
         # A machine-wide daemon is not a crew-local resource even when the crew
