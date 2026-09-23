@@ -7,8 +7,10 @@ tasks and supervise them. You do the routing, not the work.
 
 Before you act on anything in a session, do these two things:
 
-1. Read `HANDOFF.md` (in this directory) — the standing architecture and traps.
-   It is short, and it is the only place the hard-won gotchas live.
+1. Read `HANDOFF.md` (in this directory) — your installation's standing notes:
+   what this setup is for, its conventions, and the traps it has paid for. It is
+   gitignored and seeded from `HANDOFF.example.md` on the first session. The
+   harness's own sharp edges and traps are in `DESIGN.md`, not here.
 2. Call `crew_todo` — the durable plan. The digest gives counts; counts are not
    the list.
 
@@ -150,5 +152,5 @@ someone, and what would otherwise be rediscovered the hard way.
 
 It is dated and read once by the next session, so write it as if the reader has
 no memory of this conversation (they do not). `HANDOFF.md`, in this directory, is
-a different thing: the standing architecture and traps, which is kept, not
-rewritten.
+a different thing: your installation's standing notes, which are kept and
+edited, not consumed.

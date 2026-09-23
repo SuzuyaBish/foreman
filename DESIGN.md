@@ -216,10 +216,18 @@ from the session that just ended is delivered once at the next start; a note the
 next session never replaces falls behind the marker and is skipped rather than
 replayed into every future session. `show` always reads it back on demand.
 
-This is why there are two documents and not one: `HANDOFF.md` is the
-standing architecture/traps doc that must survive being read, while
-`.foreman/handoff.md` is the dated, single-use narrative. One file would keep
-trying to wipe the part that is still useful.
+This is why there are two documents and not one: `HANDOFF.md` is the standing
+doc that must survive being read, while `.foreman/handoff.md` is the dated,
+single-use narrative. One file would keep trying to wipe the part that is still
+useful.
+
+The standing doc belongs to the **installation**, not to this repo, so it is
+gitignored: what a crew operation learns about a particular project is not
+something a clone of the harness should inherit. The tracked
+`HANDOFF.example.md` is its shape; the first session in a clone seeds
+`HANDOFF.md` from it (`crew-handoff.sh standing`). The harness's own sharp edges
+and traps are in this file, where they are versioned with the code that has to
+obey them.
 
 ## Lavish review boards
 
@@ -419,3 +427,138 @@ zero-token mechanics. Its shape follows from the design:
 - No second mates, no remote hosts, no quota routing, no PR pipeline validator.
 - No budget accounting.
 - No skill router and no per-event reference loading.
+
+## Sharp edges
+
+- **A crew's teardown is enforced, not requested.** `review` and `done` are
+  refused while anything the crew started is still running under its working
+  directory, and stopping a crew sweeps the rest. Attribution is by cwd, because a
+  background job is orphaned to PID 1 and keeps no readable link to the shell that
+  started it — see DESIGN, "Teardown", for why every other signal fails. The probe
+  fails **open**: no `lsof`, or no anchor to attribute to, means the gate stands
+  aside rather than holding work hostage.
+- **A failed `gh pr merge` is just a blocker.** It appends `blocked` with gh's own
+  reason, on one line, and exits nonzero. There is no automatic retry and no
+  conflict resolution.
+- **Only `gh`/GitHub** is supported for delivery.
+- **Stall detection is age-based.** A crew that produces no event for
+  `FOREMAN_STALL_SECS` (default 30m) is escalated once per episode. A genuinely
+  long turn with no progress report will trip it; the wake is informational, so the
+  cost of a false positive is one line, not an action.
+- **Worktrees are cut from `HEAD`** of the project checkout; uncommitted work in
+  that checkout is not carried into the crew's worktree. `crew-worktree.sh add`
+  warns with a count of what will be left behind, and spawn surfaces it, but it is
+  still a warning — nothing stops a crew being launched from a dirty source.
+- **Lavish's `poll` is bounded, not raw.** `lavish-axi poll` appends a full DOM
+  serialization of the artifact — up to tens of KB. Both the extension and the
+  crew-side tool replace the `dom_snapshot:` line and cap what they forward.
+
+## Traps already found (do not re-introduce)
+
+- `printf '--- %s'` breaks on macOS bash 3.2: it reads `---` as options.
+- Rewriting this repo's history: `git filter-branch --tree-filter` runs the filter
+  with `eval` in the shell that owns the commit loop, so an `exit` inside it
+  (including `exit 0`) ends the whole rewrite *silently* after one commit, leaving
+  the ref untouched and no error printed. End the filter with `:` and never `exit`.
+  Check the count of filter invocations, not the exit status.
+- `awk` has no `continue` outside a loop; use `next`.
+- A `mkdir`-based lock removed with `rm -f` is never released. Always `rmdir`.
+- Herdr `pane read --lines N` returns **empty** when N is below the viewport
+  height. Always ask for 200 and trim locally.
+- Herdr `pane get`'s `cwd` is frozen at creation; only `foreground_cwd` moves.
+- `crew-spawn` briefs must carry `FOREMAN_HOME=` explicitly, because the crew
+  member's shell does not inherit it.
+- The derived paths (`FOREMAN_TASKS`, `FOREMAN_BOARD`, `FOREMAN_CONFIG`) are cached
+  when `foreman-lib.sh` is sourced. A script that takes a home as an argument and
+  then does `FOREMAN_HOME=$arg` keeps writing to the **ambient** home. Use
+  `foreman_use_home`. This broke every `agent_start`/`agent_settled` write from a
+  crew whose foreman home was not the repo default: the busy record stayed at its
+  spawn value and the crew read as permanently busy. The unit test only ever passed
+  the ambient home, so nothing caught it until the live wire file did.
+- The foreman extension is project-local: `.pi/extensions/foreman.ts`, which pi
+  discovers whenever it runs in this directory. Approve pi's project-trust prompt
+  once per clone — project extensions do not load before the project is trusted.
+  Never name it with `-e` as well: a project extension plus an explicit one loads
+  twice, giving two wake watchers and duplicated tools. Do not `pi install` it:
+  installed globally would start its auto-wake watcher in every session, in every
+  project.
+- Herdr has **no** parent/child relationship for panes or agents. `herdr agent
+  list` returns `parent_pane_id`, `parent_agent_id` and `depth`, but nothing can set
+  them: no CLI flag, no socket method, and firstmate does not either. A crew reads
+  as a subordinate by being its own workspace, labelled `└ <id>` and moved after
+  the foreman's — see DESIGN, "How a crew member appears".
+- `workspace.move` exists only on Herdr's control socket; `herdr workspace` has no
+  move subcommand. `bin/herdr-workspace-move.mjs` is the transport, and
+  `FOREMAN_HERDR_MOVER` overrides it, which is how the tests watch the request
+  without opening a socket.
+- `crew-stop --close` must close the recorded **tab** even when the pane is already
+  gone, or tabs leak.
+- A stray process cannot be found by environment, process group or pane: the shell
+  that started it exits, the job is reparented to PID 1, and `ps -E` reports
+  **nothing** for a reparented process on macOS while `herdr pane process-info`
+  only lists the pane's own foreground group. `crew-processes.sh` therefore
+  attributes by **cwd** via `lsof -d cwd`, and its two test seams
+  (`FOREMAN_PROC_PS_FILE`, `FOREMAN_PROC_LSOF_FILE`) exist so a test can be exact
+  instead of lucky.
+- The anchor is the worktree when there is one, else the crew's cwd, and
+  `processes-at-launch` excludes what predated the crew. That file is written on
+  the **first** launch only: re-snapshotting on a relaunch would file the strays
+  from the run that just died as "already there" and nothing would ever stop them.
+- Ancestors and descendants of the agent are computed as two separate sets in
+  `proc_protected`. Expanding ancestors and then descendants protects every sibling
+  in the session, which is the entire multiplexer's worth of processes — the
+  teardown silently stops finding anything.
+- The process-name exemption list is short and deliberate: `pi`, `agent-device mcp`,
+  `lavish-axi` (whose own contract is to stay up while the captain annotates and to
+  stop itself afterwards), and the `adb` `fork-server` — a machine-wide daemon on a
+  fixed port that other tools are already talking to, which a crew starts only as a
+  side effect of using it. Add to it only with that same kind of reason.
+- The probe must not report itself, and it did. `crew-processes.sh` runs from
+  inside the crew's directory, so its own `lsof` and `awk` had the anchor as their
+  cwd; `lsof` also lists itself, so a scan taken before the process table named it
+  returned "one stray", which refused a real crew's `done` report. Two fixes, both
+  kept: the tables are read with the cwd moved to `/`, and a pid the table cannot
+  name is never reported. `tests/crew-processes.test.sh` runs the probe from inside
+  the anchor with nothing running and requires silence.
+- `fm_stray` (tests/lib.sh) writes its pid file **outside** the anchor on purpose:
+  a stray that changed the worktree would make it dirty, and archiving refuses a
+  dirty worktree.
+- The teardown gate fails **open** (exit 3) when it cannot tell, and `--interrupt`
+  never sweeps: a pause is not a stop, and the agent may still be using what it
+  started.
+- The todo scope rule lives in **two owners on purpose**: `crew-todo.sh` for the
+  tools and the digest, and `todoScope()` in the extension for the chrome, which
+  renders every 15s and must not fork a shell to find out which project it is
+  looking at. `tests/crew-chrome.test.sh` asserts both resolve the same scope on one
+  fixture; if you change the rule, change both and keep that test.
+- Scoping must never *hide* queued work: `list` prints the `open elsewhere:` line
+  and `summary` the `also <scope> N open` tail for exactly that reason. Dropping
+  them would make the board lie by omission.
+- The todo scope field is appended as **field 6** (`<seq> <status> <crew> <text>
+  <note> <scope>`), so every awk that rewrites a row keeps it automatically and rows
+  written before scopes existed stay parseable. `sync` is the one place that
+  backfills a missing scope, from the crew the row is linked to.
+- The wake count has **two owners that must agree**: `foreman_queue_pending` in
+  `foreman-lib.sh` and `countPending()` in the extension (which cannot fork a shell
+  to ask, since it runs on the watcher's exit). `tests/crew-wake.test.sh` pins them
+  on one fixture. They disagreed once, expensively: the extension read `.wake-queue`
+  and `.wake-acked` inside **one** `try`, and the ack file only exists after a first
+  drain, so on a fresh home the ENOENT answered "no wakes". Nothing was announced,
+  nothing was drained, the file was never created, and the foreman could sit idle
+  while a crew finished and opened a pull request. A missing ack file means "nothing
+  acked yet" (0) — never "no wakes".
+- A wake must spend a turn (`sendUserMessage`, i.e. a user message) and the session
+  digest must not (`sendMessage` with `triggerTurn: false`). Both halves are asserted
+  in `tests/crew-wake.test.sh`; a wake delivered as quiet context is a wake nobody
+  reads.
+- The extension a whole session runs is the code loaded at its start. Editing
+  `.pi/extensions/foreman.ts` changes nothing for a session already open: restart pi
+  (or `--continue`) for a fix to take effect, and until then the durable wake rows
+  simply wait.
+- Type-checking the extension needs a *sibling* `node_modules`: the global `tsc`
+  rejects `baseUrl` and any non-relative `paths`, so copy `.pi/extensions/foreman.ts`
+  into a temp dir next to a symlink to
+  `$HOME/.pi/agent/install/releases/<v>/node_modules`, add `{"type":"module"}` and a
+  tsconfig with `types: ["node"]`, and run `tsc` there.
+  `node --experimental-strip-types` runs the file directly for the chrome test, so a
+  type error only shows up in this check.

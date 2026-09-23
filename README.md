@@ -41,9 +41,11 @@ everywhere else — even after a reload — has no widget, no status line, no
 `crew_*` tools and no digest. That is deliberate: installing the extension
 globally would start its auto-wake watcher in every session, in every project.
 
-Every session starts the same way: the foreman reads `HANDOFF.md` (the
-standing architecture and traps) and then `crew_todo` (the durable plan), as
-`AGENTS.md` instructs. It is also handed a one-line `crew digest:` and, once,
+Every session starts the same way: the foreman reads `HANDOFF.md` (your
+installation's standing notes, seeded on the first session from
+`HANDOFF.example.md`) and then `crew_todo` (the durable plan), as `AGENTS.md`
+instructs. It is gitignored: the harness's own sharp edges and traps live in
+`DESIGN.md`, with the code that has to obey them. It is also handed a one-line `crew digest:` and, once,
 the previous session's dated handoff note — both orientation, not the plan.
 
 ```
@@ -229,8 +231,8 @@ nothing is wiped, and a note the next session never replaces is skipped rather
 than replayed forever. `crew_handoff` with no text reads the current note back on
 demand.
 
-That note is separate from `HANDOFF.md`, which is the standing
-architecture and traps doc: kept and edited, never consumed.
+That note is separate from `HANDOFF.md`, your installation's standing doc:
+gitignored, kept and edited, never consumed.
 
 ## Busy state
 

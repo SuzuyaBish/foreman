@@ -9,7 +9,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 AGENTS="$ROOT/AGENTS.md"
-STANDING="$ROOT/HANDOFF.md"
+STANDING_EXAMPLE="$ROOT/HANDOFF.example.md"
 
 section_line() { grep -n "^## $1\$" "$AGENTS" 2>/dev/null | head -1 | cut -d: -f1; }
 
@@ -35,10 +35,17 @@ test_the_ritual_names_the_two_steps() {
   assert_contains "$body" '`HANDOFF.md`' "the ritual points at the standing doc"
   assert_no_grep "foreman/HANDOFF.md" "$AGENTS" "the ritual must not double the path"
   assert_contains "$body" "crew_todo" "the ritual names the durable plan"
-  assert_present "$STANDING" "the standing doc the ritual points at exists"
-  [ -s "$STANDING" ] || fail "the standing doc is empty"
-  assert_grep "## Traps" "$STANDING" "the standing doc actually carries the traps"
-  pass "the ritual names both steps and the doc it points at is real"
+  # The standing doc belongs to the installation, so a clone ships the example it
+  # is seeded from and nothing else. An instance's notes must never be publishable
+  # by accident - that is the whole reason it is gitignored, and it is asserted
+  # here rather than trusted, because "we remembered to ignore it" is exactly the
+  # kind of thing a later commit adds a file past.
+  assert_present "$STANDING_EXAMPLE" "the example a first session is seeded from exists"
+  assert_grep "HANDOFF.md" "$ROOT/.gitignore" "the standing doc is gitignored"
+  # The harness's own traps are not standing notes: they live with the code that
+  # has to obey them, in DESIGN.md.
+  assert_grep "## Traps" "$ROOT/DESIGN.md" "the harness traps live in DESIGN.md"
+  pass "the ritual names both steps, and the doc it points at is the installation's own"
 }
 
 test_the_injected_messages_are_explained() {

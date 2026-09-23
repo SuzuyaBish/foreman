@@ -89,6 +89,38 @@ EOF
   pass "bad input and an empty home are handled honestly"
 }
 
+test_standing_seeds_from_the_example_and_then_stands_still() {
+  local dir example standing out
+  dir=$(fm_tmproot standing)
+  example="$dir/HANDOFF.example.md"
+  standing="$dir/HANDOFF.md"
+  printf '# Handoff\n\nMine.\n' >"$example"
+
+  # A fresh clone has the example and no standing doc; the first session seeds one.
+  out=$(FOREMAN_STANDING="$standing" FOREMAN_STANDING_EXAMPLE="$example" "$HANDOFF" standing --seed)
+  assert_equals "" "$out" "--seed is quiet, because a session start is not a place for output"
+  assert_grep "Mine." "$standing" "the standing doc was seeded from the example"
+
+  # Once it exists it is the installation's; the example never overwrites it.
+  printf 'My own notes.\n' >"$standing"
+  FOREMAN_STANDING="$standing" FOREMAN_STANDING_EXAMPLE="$example" "$HANDOFF" standing --seed >/dev/null
+  assert_equals "My own notes." "$(cat "$standing")" "seeding never overwrites the installation's notes"
+
+  # The bare verb reads it back, which is how a session reads its standing notes.
+  out=$(FOREMAN_STANDING="$standing" FOREMAN_STANDING_EXAMPLE="$example" "$HANDOFF" standing)
+  assert_contains "$out" "My own notes." "the bare verb prints the standing doc"
+  pass "the standing doc is the installation's own, seeded from the tracked example"
+}
+
+test_standing_is_quiet_when_there_is_nothing_to_seed() {
+  local dir out
+  dir=$(fm_tmproot standing-empty)
+  out=$(FOREMAN_STANDING="$dir/HANDOFF.md" FOREMAN_STANDING_EXAMPLE="$dir/nope.md" "$HANDOFF" standing 2>&1)
+  assert_equals "" "$out" "no example and no doc is not an error and not output"
+  [ -e "$dir/HANDOFF.md" ] && fail "nothing was seeded, so nothing should exist"
+  pass "a clone without the example stays silent rather than failing a session"
+}
+
 test_write_dates_the_note
 test_read_ingests_it_once
 test_show_ignores_the_marker
@@ -96,3 +128,5 @@ test_a_new_note_is_ingested_again
 test_a_stale_note_is_skipped
 test_no_herdr_needed
 test_refusals_and_empty_state
+test_standing_seeds_from_the_example_and_then_stands_still
+test_standing_is_quiet_when_there_is_nothing_to_seed

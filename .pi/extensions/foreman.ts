@@ -901,6 +901,14 @@ export default function foreman(pi: ExtensionAPI) {
 		} catch {
 			/* no note to ingest */
 		}
+		// The standing doc belongs to this installation and is gitignored, so a fresh
+		// clone has only the tracked example. Seed it once, quietly, before the ritual
+		// in AGENTS.md goes looking for it; `--seed` prints nothing on purpose.
+		try {
+			await run("crew-handoff.sh", ["standing", "--seed"], 200);
+		} catch {
+			/* a missing example is no reason to fail a session */
+		}
 		// Open the session oriented: one line of fleet and todo state, injected
 		// into context without spending a turn or cluttering the transcript.
 		try {

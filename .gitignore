@@ -1,3 +1,6 @@
 .foreman/
 projects/
 worktrees/
+
+# The standing doc is the installation's own. Seeded from HANDOFF.example.md.
+HANDOFF.md
