@@ -28,14 +28,14 @@ test_refuses_without_a_next() {
 }
 
 test_stdout_is_paste_ready() {
-  "$AREA" add roboteur --title "Roboteur" --kind repo --where "~/code/roboteur" >/dev/null
-  "$NOTE" roboteur --status "parser merged; flags half done" "closed the parser PR" >/dev/null
-  "$NEXT" roboteur "add --dry-run and a test for it" >/dev/null
+  "$AREA" add atlas --title "Atlas" --kind repo --where "~/code/atlas" >/dev/null
+  "$NOTE" atlas --status "parser merged; flags half done" "closed the parser PR" >/dev/null
+  "$NEXT" atlas "add --dry-run and a test for it" >/dev/null
 
   local out err
-  out=$("$PRESCRIBE" roboteur 2>"$ERRF")
+  out=$("$PRESCRIBE" atlas 2>"$ERRF")
   err=$(cat "$ERRF")
-  assert_contains "$out" "House prescription - Roboteur" "the prompt names the area"
+  assert_contains "$out" "House prescription - Atlas" "the prompt names the area"
   assert_contains "$out" "Where it stands:" "the prompt carries the status"
   assert_contains "$out" "parser merged; flags half done" "the status is the chart's"
   assert_contains "$out" "Diagnosed next step:" "the prompt labels the step"
@@ -43,25 +43,25 @@ test_stdout_is_paste_ready() {
   assert_contains "$out" "Standing conventions:" "the conventions are included"
   assert_contains "$out" "pull request" "a repo area is delivered as a PR"
   assert_contains "$err" "wrote" "the outbox path is reported on stderr"
-  assert_present "$OUTBOX/roboteur-"*.md "the prompt landed in the outbox"
-  assert_contains "$(cat "$OUTBOX"/roboteur-*.md)" "House prescription - Roboteur" "the outbox holds the prompt"
+  assert_present "$OUTBOX/atlas-"*.md "the prompt landed in the outbox"
+  assert_contains "$(cat "$OUTBOX"/atlas-*.md)" "House prescription - Atlas" "the outbox holds the prompt"
   pass "prescribe prints a self-contained prompt and outboxes it"
 }
 
 test_stdout_skips_the_outbox() {
   rm -rf "$OUTBOX"
   local out
-  out=$("$PRESCRIBE" roboteur --stdout 2>/dev/null)
-  assert_contains "$out" "House prescription - Roboteur" "the prompt is still printed"
+  out=$("$PRESCRIBE" atlas --stdout 2>/dev/null)
+  assert_contains "$out" "House prescription - Atlas" "the prompt is still printed"
   assert_absent "$OUTBOX" "--stdout writes no outbox"
   pass "--stdout is the pure pipe"
 }
 
 test_delivery_follows_the_kind() {
-  "$AREA" add nedbank-chat --title "Nedbank app" --kind chat --where "the app chat" >/dev/null
-  "$NEXT" nedbank-chat "wire the accounts tab to the new API" >/dev/null
+  "$AREA" add harbour-chat --title "Harbour app" --kind chat --where "the app chat" >/dev/null
+  "$NEXT" harbour-chat "wire the accounts tab to the new API" >/dev/null
   local out
-  out=$("$PRESCRIBE" nedbank-chat --stdout 2>/dev/null)
+  out=$("$PRESCRIBE" harbour-chat --stdout 2>/dev/null)
   assert_contains "$out" "report file" "a chat area is delivered as a report"
   assert_contains "$out" "not a repository" "the prompt says why there is no PR"
   assert_not_contains "$out" "Commit on a branch" "a chat area does not get PR instructions"
@@ -71,10 +71,10 @@ test_delivery_follows_the_kind() {
 test_context_is_appended() {
   printf 'the API key lives in 1Password\n' >"$FOREMAN_HOME/ctx.md"
   local out
-  out=$("$PRESCRIBE" roboteur --stdout --context "$FOREMAN_HOME/ctx.md" 2>/dev/null)
+  out=$("$PRESCRIBE" atlas --stdout --context "$FOREMAN_HOME/ctx.md" 2>/dev/null)
   assert_contains "$out" "Extra context" "the context is labelled"
   assert_contains "$out" "the API key lives in 1Password" "the context body is included"
-  if "$PRESCRIBE" roboteur --stdout --context "$FOREMAN_HOME/nope.md" >/dev/null 2>&1; then
+  if "$PRESCRIBE" atlas --stdout --context "$FOREMAN_HOME/nope.md" >/dev/null 2>&1; then
     fail "a missing context file was accepted"
   fi
   pass "--context appends a file and refuses a missing one"
@@ -88,11 +88,11 @@ cat >"${PBCLIP:?}"
 SH
   chmod +x "$FM_FAKEBIN/pbcopy"
   local rc
-  PBCLIP="$FOREMAN_HOME/clip.txt" "$PRESCRIBE" roboteur --stdout --copy >/dev/null 2>"$ERRF"
+  PBCLIP="$FOREMAN_HOME/clip.txt" "$PRESCRIBE" atlas --stdout --copy >/dev/null 2>"$ERRF"
   rc=$?
   expect_code 0 "$rc" "copy with a clipboard tool succeeds"
   assert_present "$FOREMAN_HOME/clip.txt" "the clipboard tool received the prompt"
-  assert_contains "$(cat "$FOREMAN_HOME/clip.txt")" "House prescription - Roboteur" "what was copied is the prompt"
+  assert_contains "$(cat "$FOREMAN_HOME/clip.txt")" "House prescription - Atlas" "what was copied is the prompt"
   assert_contains "$(cat "$ERRF")" "copied to clipboard" "copy is reported"
   pass "--copy puts the prescription on the clipboard"
 }
@@ -100,7 +100,7 @@ SH
 test_copy_degrades_without_a_clipboard() {
   local sans rc
   sans=$(fm_path_without pbcopy xclip wl-copy)
-  PATH="$sans" "$PRESCRIBE" roboteur --stdout --copy >/dev/null 2>"$ERRF"
+  PATH="$sans" "$PRESCRIBE" atlas --stdout --copy >/dev/null 2>"$ERRF"
   rc=$?
   expect_code 0 "$rc" "no clipboard tool is not an error"
   assert_contains "$(cat "$ERRF")" "no clipboard tool" "the degradation is explained"
@@ -109,10 +109,10 @@ test_copy_degrades_without_a_clipboard() {
 
 test_outbox_collisions_do_not_overwrite() {
   rm -rf "$OUTBOX"
-  "$PRESCRIBE" roboteur >/dev/null 2>&1
-  "$PRESCRIBE" roboteur >/dev/null 2>&1
+  "$PRESCRIBE" atlas >/dev/null 2>&1
+  "$PRESCRIBE" atlas >/dev/null 2>&1
   local n
-  n=$(find "$OUTBOX" -name 'roboteur-*.md' | wc -l | tr -d ' ')
+  n=$(find "$OUTBOX" -name 'atlas-*.md' | wc -l | tr -d ' ')
   assert_equals "2" "$n" "two prescriptions in the same second do not overwrite"
   pass "the outbox keeps every prescription"
 }
