@@ -133,29 +133,33 @@ house_edit() { # <path> [--set <key> <value>]... [--log <date> <text>]...
   shift
   [ -f "$path" ] || house_die "no such chart: $path"
 
-  local dirs tmp lock
-  dirs=$(mktemp "${TMPDIR:-/tmp}/house-edit.XXXXXX") || house_die "could not stage chart edits"
-  tmp="$path.tmp.$$"
-  lock="$path.lock"
-  # shellcheck disable=SC2064 # expand the temp names now, not at trap time
-  trap 'rm -rf "$lock" "$tmp" "$dirs"' EXIT
-
+  # Validate and collect every value first, so a bad value aborts before the
+  # chart, the lock or any temp file is touched. There is no EXIT trap: a trap
+  # that removes "$lock" can fire for a process that never held it (or after a
+  # local has gone out of scope) and open the critical section to two writers,
+  # which is exactly the lost append this function exists to prevent. Cleanup is
+  # explicit on every path this function can take; only a hard kill leaks a lock,
+  # the same as the inbox lock in crew-send.sh.
+  local -a skeys=() svals=() ldates=() ltexts=()
+  local ns=0 nl=0
   while [ $# -gt 0 ]; do
     case "$1" in
     --set)
       [ $# -ge 3 ] || house_die "internal: house_edit --set needs a key and a value"
       local sval
-      # Capture first: a command substitution inside printf would swallow the
-      # sanitizer's failure and write a half-checked directive.
       sval=$(house_sanitize_field "$2" "$3") || exit 1
-      printf 'S\t%s\t%s\n' "$2" "$sval" >>"$dirs"
+      skeys[$ns]=$2
+      svals[$ns]=$sval
+      ns=$((ns + 1))
       shift 3
       ;;
     --log)
       [ $# -ge 3 ] || house_die "internal: house_edit --log needs a date and text"
       local lval
       lval=$(house_flatten_log "$3") || exit 1
-      printf 'L\t%s\t%s\n' "$2" "$lval" >>"$dirs"
+      ldates[$nl]=$2
+      ltexts[$nl]=$lval
+      nl=$((nl + 1))
       shift 3
       ;;
     *)
@@ -164,7 +168,25 @@ house_edit() { # <path> [--set <key> <value>]... [--log <date> <text>]...
     esac
   done
 
-  house_lock_acquire "$lock" || house_die "could not lock chart $path (another writer is busy)"
+  local dirs tmp lock i
+  dirs=$(mktemp "${TMPDIR:-/tmp}/house-edit.XXXXXX") || house_die "could not stage chart edits"
+  i=0
+  while [ "$i" -lt "$ns" ]; do
+    printf 'S\t%s\t%s\n' "${skeys[$i]}" "${svals[$i]}" >>"$dirs"
+    i=$((i + 1))
+  done
+  i=0
+  while [ "$i" -lt "$nl" ]; do
+    printf 'L\t%s\t%s\n' "${ldates[$i]}" "${ltexts[$i]}" >>"$dirs"
+    i=$((i + 1))
+  done
+
+  tmp="$path.tmp.$$"
+  lock="$path.lock"
+  if ! house_lock_acquire "$lock"; then
+    rm -f "$dirs"
+    house_die "could not lock chart $path (another writer is busy)"
+  fi
 
   if ! awk -F '\t' '
     FILENAME == ARGV[1] {
@@ -208,13 +230,20 @@ house_edit() { # <path> [--set <key> <value>]... [--log <date> <text>]...
       }
     }
   ' "$dirs" "$path" >"$tmp"; then
+    rm -f "$tmp" "$dirs"
+    rmdir "$lock" 2>/dev/null || true
     house_die "could not write chart $path"
   fi
-
-  mv "$tmp" "$path"
-  rm -rf "$lock"
+  if ! mv "$tmp" "$path"; then
+    rm -f "$tmp" "$dirs"
+    rmdir "$lock" 2>/dev/null || true
+    house_die "could not replace chart $path"
+  fi
   rm -f "$dirs"
-  trap - EXIT
+  # Release with rmdir, never `rm -rf`: `rm -rf` re-checks and can remove a lock
+  # another writer created in the gap, which reopens the critical section and
+  # loses an append. rmdir is one atomic syscall on the empty lock directory.
+  rmdir "$lock" 2>/dev/null || true
 }
 
 # One convention, UTC everywhere. `updated` is written as a UTC civil date and
