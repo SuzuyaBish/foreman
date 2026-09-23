@@ -23,7 +23,7 @@ mkdir -p "$EXTDIR" "$BINDIR/node_modules" "$ROOTDIR/node_modules/@earendil-works
 # bin is copied rather than symlinked, because the watcher is stubbed here.
 cp -R "$ROOT/bin" "$ROOTDIR/bin.real"
 rm -rf "$BINDIR" && mv "$ROOTDIR/bin.real" "$BINDIR"
-cp "$ROOT/.pi/extensions/foreman.ts" "$EXTDIR/foreman.ts"
+cp "$ROOT/.pi/extensions/"*.ts "$EXTDIR/"
 
 cat >"$ROOTDIR/node_modules/@earendil-works/pi-ai/package.json" <<'JSON'
 { "name": "@earendil-works/pi-ai", "type": "module", "exports": "./index.js" }
