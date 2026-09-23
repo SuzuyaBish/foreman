@@ -1,3 +1,11 @@
+<p align="center">
+  <img
+    alt="foreman — talk to one agent, it runs the crew: a captain, a foreman, and a crew of parallel agents in isolated git worktrees"
+    src="assets/social-preview.png"
+    width="100%"
+  />
+</p>
+
 # foreman
 
 Talk to one agent. It runs the crew. Your context stays flat.
