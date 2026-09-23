@@ -199,6 +199,13 @@ read the diff, comment, or push the crew further. Only a merge, a close, or an
 explicit captain instruction releases it. Nothing is discarded on the way: the
 branch always survives, and archiving a task never deletes commits.
 
+A **successful merge** releases the terminal along with the task: it closes the
+home the foreman created for the crew — its workspace, else its tab — so a merged
+crew cannot sit idle in the fleet reading as work still running. Only the
+terminal goes: the task stays `done`, and its record and branch survive for the
+captain. A refused merge — a conflict, a failing check, an error from the forge —
+closes nothing, because the crew is still needed.
+
 The foreman merges with `crew_merge` **only when the captain has said to**. That
 guard is the tool's whole reason for existing separately from `gh`.
 
