@@ -21,6 +21,87 @@ review_task() { # <id> <pr>
   "$BIN/crew-report.sh" "$1" review "ready" --pr "$2" >/dev/null
 }
 
+# review_worktree_task <id> <project-name> <pr>: a review task with a real git
+# worktree and a real commit on its branch, so a merge can be judged with git.
+review_worktree_task() {
+  local id=$1 proj=$2 pr=$3 wt
+  fm_task "$id" working >/dev/null
+  wt=$("$BIN/crew-worktree.sh" add "$proj" "$id")
+  printf 'project=%s\nworktree=%s\n' "$FOREMAN_PROJECTS/$proj" "$wt" >>"$FOREMAN_HOME/tasks/$id/meta"
+  printf 'work for %s\n' "$id" >"$wt/change.txt"
+  git -C "$wt" add change.txt
+  git -C "$wt" -c user.name=t -c user.email=t@e.test commit -qm "$id change"
+  "$BIN/crew-report.sh" "$id" review "ready" --pr "$pr" >/dev/null
+  printf '%s\n' "$wt"
+}
+
+test_delete_branch_refuses_a_dirty_worktree() {
+  local proj wt before_calls
+  proj="$FOREMAN_PROJECTS/dirtyrepo"
+  fm_git_repo "$proj" --origin >/dev/null
+  wt=$(review_worktree_task md dirtyrepo 52)
+  printf 'uncommitted scratch\n' >"$wt/scratch.txt"
+  before_calls=$(fm_gh_calls | wc -l | tr -d ' ')
+
+  if "$MERGE" md --delete-branch >/dev/null 2>&1; then
+    fail "merging with a dirty worktree was accepted"
+  fi
+  assert_present "$wt/scratch.txt" "the uncommitted work survives"
+  assert_present "$wt/.git" "the worktree survives"
+  git -C "$proj" show-ref --verify --quiet refs/heads/crew/md || fail "the branch survives"
+  assert_equals "review" "$(state_of md)" "nothing was merged, so the task stays in review"
+  assert_equals "$before_calls" "$(fm_gh_calls | wc -l | tr -d ' ')" "gh was never asked to merge"
+
+  # Once the work is dealt with, the same merge goes through.
+  rm -f "$wt/scratch.txt"
+  "$MERGE" md --delete-branch >/dev/null
+  assert_absent "$wt" "the clean worktree is removed"
+  assert_equals "done" "$(state_of md)" "the retried merge settles the task"
+  pass "--delete-branch will not discard uncommitted work to get the merge"
+}
+
+test_failed_merge_leaves_the_work_untouched() {
+  local proj wt before
+  proj="$FOREMAN_PROJECTS/conflictrepo"
+  fm_git_repo "$proj" --origin >/dev/null
+  wt=$(review_worktree_task mf conflictrepo 53)
+  before=$(git -C "$proj" rev-parse refs/heads/crew/mf)
+
+  # A merge gh refuses (the crude conflict path) must be visible and harmless.
+  printf '1\n' >"$GH_STUB_STATE/merge-exit"
+  if "$MERGE" mf >/dev/null 2>&1; then fail "a failed gh merge reported success"; fi
+  assert_equals "blocked" "$(state_of mf)" "a failed merge blocks the task"
+  assert_contains "$(note_of mf)" "merge command failed for 53" "the blocker names the pull request"
+  assert_present "$wt/change.txt" "the crew's commit survives a failed merge"
+  assert_present "$wt/.git" "the worktree survives a failed merge"
+  assert_equals "$before" "$(git -C "$proj" rev-parse refs/heads/crew/mf)" \
+    "the branch tip is unchanged by a failed merge"
+  assert_equals "" "$(git -C "$wt" status --porcelain)" "the worktree is still clean and usable"
+
+  # The captain resolves whatever gh needed; the task must be put back into
+  # review (a failed merge blocks it), and then the merge succeeds.
+  rm -f "$GH_STUB_STATE/merge-exit"
+  "$BIN/crew-report.sh" mf review "conflict resolved, re-merging" >/dev/null
+  "$MERGE" mf --delete-branch >/dev/null
+  assert_equals "done" "$(state_of mf)" "a retried merge settles the task"
+  assert_absent "$wt" "the worktree is only removed by the successful merge"
+  pass "a failed merge is non-destructive and can be retried"
+}
+
+test_delete_branch_tolerates_a_missing_worktree() {
+  local proj wt
+  proj="$FOREMAN_PROJECTS/gonerepo"
+  fm_git_repo "$proj" --origin >/dev/null
+  wt=$(review_worktree_task mg gonerepo 54)
+  "$BIN/crew-worktree.sh" remove mg >/dev/null
+  assert_absent "$wt" "the worktree was removed before the merge"
+
+  "$MERGE" mg --delete-branch >/dev/null
+  assert_equals "done" "$(state_of mg)" "a merge with no worktree left still settles"
+  assert_contains "$(fm_gh_calls)" "pr merge 54 --squash --delete-branch" "the delete flag still reaches gh"
+  pass "a merge does not require the worktree to still exist"
+}
+
 test_merge_requires_review() {
   fm_task m1 working >/dev/null
   if "$MERGE" m1 >/dev/null 2>&1; then fail "merging a task that is not in review was accepted"; fi
@@ -95,4 +176,7 @@ test_merge_settles_the_task
 test_methods
 test_failed_merge_is_visible
 test_delete_branch_removes_the_worktree_first
+test_delete_branch_refuses_a_dirty_worktree
+test_failed_merge_leaves_the_work_untouched
+test_delete_branch_tolerates_a_missing_worktree
 test_missing_gh_is_refused
