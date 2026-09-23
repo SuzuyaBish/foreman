@@ -13,16 +13,28 @@ Read [DESIGN.md](DESIGN.md) for the context contract. It is the point.
 
 ## Contents
 
-- [The loop](#the-loop) — what using it actually looks like
-- [Who is who](#who-is-who) — the words this repo uses
-- [Requirements](#requirements) · [Run](#run) · [Projects](#projects)
-- [Crew settings](#crew-settings) · [Delivery](#delivery)
-- [Talking to a crew](#talking-to-a-crew) · [The chrome](#the-chrome)
-- [The todo list](#the-todo-list) · [Decisions](#decisions) · [Merges](#merges)
-- [Recovery](#recovery) · [Handoff](#handoff) · [Busy state](#busy-state)
-- [Teardown](#teardown) · [Lavish review boards](#lavish-review-boards)
+- [The loop](#the-loop)
+- [Who is who](#who-is-who)
+- [Requirements](#requirements)
+- [Run](#run)
+- [Projects](#projects)
+- [Crew settings](#crew-settings)
+- [Delivery](#delivery)
+- [Talking to a crew](#talking-to-a-crew)
+- [How a crew member appears](#how-a-crew-member-appears)
+- [The chrome](#the-chrome)
+- [The todo list](#the-todo-list)
+- [Decisions](#decisions)
+- [Merges](#merges)
+- [Recovery](#recovery)
+- [Handoff](#handoff)
+- [Busy state](#busy-state)
+- [Teardown](#teardown)
+- [Lavish review boards](#lavish-review-boards)
 - [What you can ask the foreman for](#what-you-can-ask-the-foreman-for)
-- [Pieces](#pieces) · [Tests](#tests) · [License](#license)
+- [Pieces](#pieces)
+- [Tests](#tests)
+- [License](#license)
 
 ## The loop
 

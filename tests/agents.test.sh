@@ -58,6 +58,22 @@ test_the_injected_messages_are_explained() {
   pass "the injected session-start messages are accounted for"
 }
 
+# The contents list is the reader's map, so it has to be the map: every entry in
+# it resolves to a section, and every section is reachable from it. Written by
+# hand it drifted immediately - "How a crew member appears" was missing, and the
+# grouped lines it was written on made the gap hard to see. Both directions are
+# asserted here, because a list that only has to be a subset is not a map.
+test_the_contents_maps_every_section() {
+  local headings links
+  headings=$(grep -oE '^## .+' "$ROOT/README.md" | sed 's/^## //' | grep -vx 'Contents' |
+    tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 -]//g; s/ /-/g' | sort)
+  links=$(sed -n '/^## Contents$/,/^## /p' "$ROOT/README.md" | grep -oE '\]\(#[^)]+\)' |
+    sed 's/](#//; s/)$//' | sort)
+  assert_equals "$headings" "$links" "the contents list and the sections agree"
+  pass "the contents list is the map of the document"
+}
+
 test_the_ritual_comes_first
 test_the_ritual_names_the_two_steps
 test_the_injected_messages_are_explained
+test_the_contents_maps_every_section
