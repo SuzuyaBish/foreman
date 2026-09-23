@@ -207,6 +207,18 @@ test_archive_retires_but_keeps() {
   pass "archiving retires an area and keeps its chart"
 }
 
+test_unarchive_returns_the_area() {
+  local out
+  out=$("$AREA" unarchive atlas)
+  assert_contains "$out" "unarchived area atlas" "unarchive reports the area"
+  assert_present "$CHART" "the chart is active again"
+  assert_absent "$ARCHIVED/atlas.md" "the archived copy is gone"
+  assert_contains "$("$AREA" list)" "atlas" "the area is listed again"
+  if "$AREA" unarchive atlas >/dev/null 2>&1; then fail "unarchiving an active area was accepted"; fi
+  if "$AREA" unarchive ghost >/dev/null 2>&1; then fail "unarchiving a missing area was accepted"; fi
+  pass "unarchive is the way back out of the archive"
+}
+
 test_empty_list
 test_add_creates_a_chart
 test_list_and_show
@@ -221,3 +233,4 @@ test_note_creates_the_log_header
 test_note_appends_a_log_to_a_headerless_chart
 test_concurrent_notes_do_not_lose_appends
 test_archive_retires_but_keeps
+test_unarchive_returns_the_area

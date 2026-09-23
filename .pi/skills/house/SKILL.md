@@ -93,7 +93,8 @@ These go into every prescription, because the receiving session has to know them
 
 - `updated` moves whenever you note or diagnose; a stale `updated` is the signal
   that the captain has not visited an area. Do not paper over it.
-- Archive an area with `house_areas action=archive` when it is truly done. The
-  chart is kept, never deleted.
+- Archive an area with `house_areas action=archive` when it is truly done;
+  `house_areas action=unarchive` brings it back. The chart is kept, never
+  deleted.
 - If an area's next step is blocked on the captain's decision, `house_note` it
   and say so; a next step that cannot start is worse than an honest "waiting".

@@ -71,7 +71,10 @@ house_require_area() {
   house_slug_ok "${1:-}" || house_die "bad area slug: ${1:-<none>} (lowercase letters, digits and dashes; max 32)"
   local p
   p=$(house_area_path "$1")
-  [ -f "$p" ] || house_die "no such area: $1"
+  if [ ! -f "$p" ]; then
+    [ -f "$(house_archived_path "$1")" ] && house_die "area $1 is archived; run: house-area.sh unarchive $1"
+    house_die "no such area: $1"
+  fi
   printf '%s' "$p"
 }
 

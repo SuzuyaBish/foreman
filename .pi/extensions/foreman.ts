@@ -549,11 +549,12 @@ const houseAreas = defineTool({
 		"The chart of ongoing areas. `list` (default) shows every active area as one " +
 		"line; `add` starts a chart for a new area (slug, title, kind, where, bind, " +
 		"status, next); `archive` retires an area out of the active list without " +
-		"deleting it. An area is any thread the captain keeps: a repo, a project in " +
+		"deleting it, and `unarchive` brings one back. An area is any thread the " +
+		"captain keeps: a repo, a project in " +
 		"its own chat, a deck or talk, a craft. It is not a git project and not a crew " +
 		"task.",
 	parameters: Type.Object({
-		action: Type.Optional(Type.String({ description: "list (default) | add | archive" })),
+		action: Type.Optional(Type.String({ description: "list (default) | add | archive | unarchive" })),
 		slug: Type.Optional(Type.String({ description: "Short kebab-case area name" })),
 		title: Type.Optional(Type.String({ description: "For add: human title" })),
 		kind: Type.Optional(Type.String({ description: "For add: repo | chat | deck | craft | other" })),
@@ -578,6 +579,10 @@ const houseAreas = defineTool({
 		if (action === "archive") {
 			if (!params.slug) throw new Error("archive needs slug");
 			return { content: [{ type: "text", text: await runHouse("house-area.sh", ["archive", params.slug], 800) }], details: undefined };
+		}
+		if (action === "unarchive") {
+			if (!params.slug) throw new Error("unarchive needs slug");
+			return { content: [{ type: "text", text: await runHouse("house-area.sh", ["unarchive", params.slug], 800) }], details: undefined };
 		}
 		const text = await runHouse("house-area.sh", ["list"]);
 		return { content: [{ type: "text", text }], details: undefined };

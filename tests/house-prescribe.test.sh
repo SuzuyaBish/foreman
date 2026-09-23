@@ -47,6 +47,17 @@ test_latest_outbox_reads_the_numeric_suffix() {
   pass "latest outbox is newest by timestamp, then by numeric suffix"
 }
 
+test_reports_an_archived_area() {
+  "$AREA" archive atlas >/dev/null
+  local rc
+  "$PRESCRIBE" atlas >/dev/null 2>"$ERRF"
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "prescribing an archived area was accepted"
+  assert_contains "$(cat "$ERRF")" "archived" "the refusal says the area is archived"
+  assert_contains "$(cat "$ERRF")" "unarchive" "the refusal points at unarchive"
+  pass "prescribe names an archived area instead of 'no such area'"
+}
+
 test_refuses_without_a_next() {
   "$AREA" add blank --kind repo >/dev/null
   local rc
@@ -170,3 +181,4 @@ test_copy_degrades_without_a_clipboard
 test_copy_reports_a_failing_clipboard
 test_outbox_collisions_do_not_overwrite
 test_latest_outbox_reads_the_numeric_suffix
+test_reports_an_archived_area

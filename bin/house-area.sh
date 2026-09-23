@@ -6,6 +6,7 @@
 #        house-area.sh list
 #        house-area.sh show <slug>
 #        house-area.sh archive <slug>
+#        house-area.sh unarchive <slug>
 #        house-area.sh --help
 #
 # An area is any ongoing thread the captain keeps in his head: a repo, a project
@@ -24,11 +25,13 @@ usage: house-area.sh add <slug> [--title T] [--kind K] [--where W]
        house-area.sh list
        house-area.sh show <slug>
        house-area.sh archive <slug>
+       house-area.sh unarchive <slug>
 
 add      start a chart. kind is one of: repo chat deck craft other.
 list     one line per active area: slug, kind, updated, next.
 show     print the whole chart.
 archive  retire an area out of the active list (the file is kept).
+unarchive return an archived area to the active list.
 EOF
 }
 
@@ -141,7 +144,19 @@ archive)
   path=$(house_require_area "$slug")
   mkdir -p "$HOUSE_ARCHIVED"
   mv "$path" "$(house_archived_path "$slug")"
-  printf 'house: archived area %s\n' "$slug"
+  printf 'house: archived area %s (unarchive to restore it)\n' "$slug"
+  ;;
+unarchive)
+  slug=${1:-}
+  [ -n "$slug" ] || house_die "usage: house-area.sh unarchive <slug>"
+  house_slug_ok "$slug" || house_die "bad area slug: $slug (lowercase letters, digits and dashes; max 32)"
+  src=$(house_archived_path "$slug")
+  [ -f "$src" ] || house_die "no archived area: $slug"
+  dst=$(house_area_path "$slug")
+  [ -f "$dst" ] && house_die "area $slug is already active"
+  mkdir -p "$HOUSE_AREAS"
+  mv "$src" "$dst"
+  printf 'house: unarchived area %s\n' "$slug"
   ;;
 *)
   house_die "unknown house-area action: $ACTION (try --help)"
